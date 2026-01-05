@@ -1,0 +1,52 @@
+name: hariyali
+description: Smart Greenhouse IoT System for small-scale farmers
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '^3.9.0'   # ✅ Correct SDK constraint
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI & Fonts
+  cupertino_icons: ^1.0.2
+  google_fonts: ^6.3.3
+
+  # Firebase
+  firebase_core: ^2.32.0
+  firebase_auth: ^4.20.0
+  firebase_database: ^10.5.7
+
+  # State Management
+  provider: ^6.1.5+1
+
+  # Voice & Permissions
+  speech_to_text: ^6.6.2
+  permission_handler: ^12.0.1
+  flutter_tts: ^4.2.3
+
+  # Networking
+  http: ^1.6.0
+
+  # WebView
+  webview_flutter: ^4.13.0
+
+  # Charts & Graphs
+  fl_chart: ^1.1.1
+
+  # Date/Time & Localization
+  intl: ^0.20.2   # ✅ Only one version
+
+  # Local Storage
+  shared_preferences: ^2.5.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

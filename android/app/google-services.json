@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "543552982852",
+    "firebase_url": "https://hariyali-10a26-default-rtdb.firebaseio.com",
+    "project_id": "hariyali-10a26",
+    "storage_bucket": "hariyali-10a26.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:543552982852:android:b1cafabe021ef9e9691111",
+        "android_client_info": {
+          "package_name": "com.hariyali"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAGmGRFwJgvMFPIlIWazmDkME68QjKv-0U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:543552982852:android:e8b4418aca476289691111",
+        "android_client_info": {
+          "package_name": "com.hariyali.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAGmGRFwJgvMFPIlIWazmDkME68QjKv-0U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
