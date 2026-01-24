@@ -130,3 +130,4 @@ class SensorData {
         'moisture: $soilMoisture%, pH: $pH, timestamp: $timestamp)';
   }
 }
+

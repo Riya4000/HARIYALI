@@ -18,6 +18,7 @@ import 'services/sensor_service.dart';
 import 'services/voice_service.dart';  // ⭐ MAKE SURE THIS IS HERE
 import 'firebase_options.dart';
 
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 

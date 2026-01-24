@@ -3,6 +3,7 @@ from flask_cors import CORS
 import pickle
 import numpy as np
 import os
+import pandas as pd   # 👈 Added Pandas import
 
 app = Flask(__name__)
 CORS(app)
@@ -44,7 +45,9 @@ def predict():
 
     try:
         data = request.json or {}
-        features = np.array([[
+
+        # ✅ Use Pandas DataFrame with feature names
+        features = pd.DataFrame([[
             data['nitrogen'],
             data['phosphorus'],
             data['potassium'],
@@ -52,18 +55,21 @@ def predict():
             data['humidity'],
             data['pH'],
             data['soilMoisture']
-        ]])
+        ]], columns=['N', 'P', 'K', 'temperature', 'humidity', 'pH', 'soilMoisture'])
 
+        # Predict using model
         pred = model.predict(features)[0]
         probabilities = model.predict_proba(features)[0]
         confidence = float(probabilities.max())
 
+        # Top 3 crops
         top_indices = np.argsort(probabilities)[-3:][::-1]
         top_crops = [{
             'crop': str(model.classes_[i]),
             'confidence': float(probabilities[i])
         } for i in top_indices]
 
+        # Recommendations
         recommendations = get_recommendations(
             pred,
             data['nitrogen'], data['phosphorus'], data['potassium'],
@@ -87,6 +93,23 @@ def predict():
         }), 400
     except Exception as e:
         return jsonify({'error': str(e), 'status': 'error'}), 500
+
+# 👇 Add this new GET route
+@app.route('/predict', methods=['GET'])
+def predict_info():
+    return jsonify({
+        "message": "Use POST with JSON body to get crop prediction.",
+        "example_body": {
+            "nitrogen": 80,
+            "phosphorus": 40,
+            "potassium": 40,
+            "temperature": 25,
+            "humidity": 70,
+            "pH": 6.5,
+            "soilMoisture": 60
+        }
+    })
+# ... rest of your get_recommendations() function unchanged ...
 
 def get_recommendations(crop, N, P, K, pH, moisture, temp, humidity):
     rec = {'crop': crop, 'fertilizer': '', 'irrigation': '', 'pH_adjustment': '', 'climate': '', 'notes': ''}

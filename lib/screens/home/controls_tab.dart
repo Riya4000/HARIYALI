@@ -15,97 +15,99 @@ class ControlsTab extends StatelessWidget {
       builder: (context, sensorService, child) {
         return Padding(
           padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Manual Controls',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Control your greenhouse devices manually',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              // Water Pump Control
-              _buildControlCard(
-                title: 'Water Pump',
-                subtitle: sensorService.isPumpOn ? 'Pump is ON' : 'Pump is OFF',
-                icon: Icons.water,
-                isOn: sensorService.isPumpOn,
-                onToggle: () => sensorService.togglePump(),
-                color: Colors.blue,
-              ),
-              const SizedBox(height: 16),
-
-              // Window Control
-              _buildControlCard(
-                title: 'Ventilation Window',
-                subtitle: sensorService.isWindowOpen ? 'Window is OPEN' : 'Window is CLOSED',
-                icon: Icons.window,
-                isOn: sensorService.isWindowOpen,
-                onToggle: () => sensorService.toggleWindow(),
-                color: Colors.orange,
-              ),
-              const SizedBox(height: 16),
-
-              // Light Control
-              _buildControlCard(
-                title: 'Grow Light',
-                subtitle: sensorService.isLightOn ? 'Light is ON' : 'Light is OFF',
-                icon: Icons.lightbulb,
-                isOn: sensorService.isLightOn,
-                onToggle: () => sensorService.toggleLight(),
-                color: Colors.amber,
-              ),
-              const SizedBox(height: 24),
-
-              // Current sensor readings
-              const Text(
-                'Current Conditions',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              if (sensorService.currentData != null) ...[
-                _buildConditionRow(
-                  'Temperature',
-                  '${sensorService.currentData!.temperature.toStringAsFixed(1)}°C',
-                  Icons.thermostat,
-                  Colors.red,
-                ),
-                const SizedBox(height: 8),
-                _buildConditionRow(
-                  'Humidity',
-                  '${sensorService.currentData!.humidity.toStringAsFixed(1)}%',
-                  Icons.water_drop,
-                  Colors.blue,
-                ),
-                const SizedBox(height: 8),
-                _buildConditionRow(
-                  'Soil Moisture',
-                  '${sensorService.currentData!.soilMoisture.toStringAsFixed(1)}%',
-                  Icons.grass,
-                  Colors.green,
-                ),
-              ] else
-                const Center(
-                  child: CircularProgressIndicator(
-                    color: Color(0xFF4CAF50),
+          child: SingleChildScrollView(   // ✅ Added scrollable wrapper
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Manual Controls',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-            ],
+                const SizedBox(height: 8),
+                const Text(
+                  'Control your greenhouse devices manually',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey,
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Water Pump Control
+                _buildControlCard(
+                  title: 'Water Pump',
+                  subtitle: sensorService.isPumpOn ? 'Pump is ON' : 'Pump is OFF',
+                  icon: Icons.water,
+                  isOn: sensorService.isPumpOn,
+                  onToggle: () => sensorService.togglePump(),
+                  color: Colors.blue,
+                ),
+                const SizedBox(height: 16),
+
+                // Window Control
+                _buildControlCard(
+                  title: 'Ventilation Window',
+                  subtitle: sensorService.isWindowOpen ? 'Window is OPEN' : 'Window is CLOSED',
+                  icon: Icons.window,
+                  isOn: sensorService.isWindowOpen,
+                  onToggle: () => sensorService.toggleWindow(),
+                  color: Colors.orange,
+                ),
+                const SizedBox(height: 16),
+
+                // Light Control
+                _buildControlCard(
+                  title: 'Grow Light',
+                  subtitle: sensorService.isLightOn ? 'Light is ON' : 'Light is OFF',
+                  icon: Icons.lightbulb,
+                  isOn: sensorService.isLightOn,
+                  onToggle: () => sensorService.toggleLight(),
+                  color: Colors.amber,
+                ),
+                const SizedBox(height: 24),
+
+                // Current sensor readings
+                const Text(
+                  'Current Conditions',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                if (sensorService.currentData != null) ...[
+                  _buildConditionRow(
+                    'Temperature',
+                    '${sensorService.currentData!.temperature.toStringAsFixed(1)}°C',
+                    Icons.thermostat,
+                    Colors.red,
+                  ),
+                  const SizedBox(height: 8),
+                  _buildConditionRow(
+                    'Humidity',
+                    '${sensorService.currentData!.humidity.toStringAsFixed(1)}%',
+                    Icons.water_drop,
+                    Colors.blue,
+                  ),
+                  const SizedBox(height: 8),
+                  _buildConditionRow(
+                    'Soil Moisture',
+                    '${sensorService.currentData!.soilMoisture.toStringAsFixed(1)}%',
+                    Icons.grass,
+                    Colors.green,
+                  ),
+                ] else
+                  const Center(
+                    child: CircularProgressIndicator(
+                      color: Color(0xFF4CAF50),
+                    ),
+                  ),
+              ],
+            ),
           ),
         );
       },
