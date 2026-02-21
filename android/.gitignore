@@ -1,33 +1,14 @@
-# Flutter/Dart/Pub related
-.dart_tool/
-.packages
-.pub-cache/
-.pub/
-build/
-flutter_export_environment.sh
+gradle-wrapper.jar
+/.gradle
+/captures/
+/gradlew
+/gradlew.bat
+/local.properties
+GeneratedPluginRegistrant.java
+.cxx/
 
-# Android related
-android/.gradle/
-android/app/build/
-android/local.properties
-
-# iOS/macOS related
-ios/Pods/
-ios/Runner/GeneratedPluginRegistrant.*
-macos/Pods/
-macos/Runner/GeneratedPluginRegistrant.*
-
-# Web related
-web/.dart_tool/
-
-# VS Code / IntelliJ related
-.vscode/
-.idea/
-
-# Firebase/Secrets (keep local, don’t push)
-google-services.json
-GoogleService-Info.plist
-
-# Misc
-*.log
-*.tmpcd
+# Remember to never publicly share your keystore.
+# See https://flutter.dev/to/reference-keystore
+key.properties
+**/*.keystore
+**/*.jks

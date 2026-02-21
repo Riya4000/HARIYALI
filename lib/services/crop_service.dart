@@ -40,7 +40,7 @@ class CropRecommendation {
 //============================================================================
 class CropService extends ChangeNotifier {
 // Your Python backend URL (change this to your actual backend URL)
-  static const String _backendUrl = 'http://192.168.121.150:5000'; // Change this!
+  static const String _backendUrl = 'http://localhost:5000'; // Change this!
 // Current recommendations
   List<CropRecommendation> _recommendations = [];
 // Loading state

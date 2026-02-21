@@ -4,12 +4,6 @@ import numpy as np
 def create_hariyali_dataset():
     print("\nCreating HARIYALI Dataset (without rainfall) ... ")
 
-    crops = [
-        'rice', 'wheat', 'maize', 'lentil', 'potato',
-        'tomato', 'cauliflower', 'cabbage', 'onion', 'garlic',
-        'soybean', 'chickpea', 'sugarcane', 'tea', 'coffee'
-    ]
-
     data = []
 
     # Rice
@@ -208,7 +202,7 @@ def create_hariyali_dataset():
         })
 
     df = pd.DataFrame(data).sample(frac=1).reset_index(drop=True)
-    df.to_csv('crop_recommendation_dataset.csv', index=False)
+    df.to_csv(path_or_buf='crop_recommendation_dataset.csv', index=False)
 
     print("Dataset created successfully!")
     print(f"Total samples: {len(df)}")

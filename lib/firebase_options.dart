@@ -90,4 +90,5 @@ class DefaultFirebaseOptions {
     storageBucket: 'hariyali-10a26.firebasestorage.app',
     measurementId: 'G-DF5X9K0C13',
   );
+
 }
