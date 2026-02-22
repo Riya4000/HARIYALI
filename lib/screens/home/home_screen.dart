@@ -11,6 +11,7 @@ import 'dashboard_tab.dart';
 import 'sensors_tab.dart';
 import 'controls_tab.dart';
 import 'voice_tab.dart';
+import 'recommendation_tab.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -28,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
     SensorsTab(),      // Charts
     ControlsTab(),     // Manual controls
     VoiceTab(),        // Voice assistant
+    RecommendationTab(),
   ];
 
   @override
@@ -117,6 +119,10 @@ class _HomeScreenState extends State<HomeScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.mic),
             label: 'Voice',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.agriculture),
+            label: 'Crops',
           ),
         ],
       ),

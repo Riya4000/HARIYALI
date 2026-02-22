@@ -121,40 +121,49 @@ color: color,
 const SizedBox(height: 16),
 
 // Chart
-SizedBox(
-height: 150,
-child: LineChart(
-LineChartData(
-gridData: FlGridData(show: false),
-titlesData: FlTitlesData(show: false),
-borderData: FlBorderData(show: false),
-lineBarsData: [
-LineChartBarData(
-spots: data.asMap().entries.map((entry) {
-return FlSpot(entry.key.toDouble(), entry.value);
-}).toList(),
-isCurved: true,
-color: color,
-barWidth: 3,
-dotData: FlDotData(show: false),
-belowBarData: BarAreaData(
-show: true,
-color: color.withOpacity(0.1),
-),
-),
-],
-),
-),
-),
+// Show "no data" message OR the chart
+  if (data.length < 2)
+  SizedBox(
+  height: 150,
+  child: Center(
+  child: Column(
+  mainAxisAlignment: MainAxisAlignment.center,
+  children: [
+  Icon(Icons.show_chart, color: Colors.grey.shade300, size: 48),
+  const SizedBox(height: 8),
+  Text('Waiting for sensor data...', style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
+  ],
+  ),
+  ),
+  )
+  else
+  SizedBox(
+  height: 150,
+  child: LineChart(
+  LineChartData(
+  gridData: const FlGridData(show: false),
+  titlesData: const FlTitlesData(show: false),
+  borderData: FlBorderData(show: false),
+  lineBarsData: [
+  LineChartBarData(
+  spots: data.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value)).toList(),
+  isCurved: true,
+  color: color,
+  barWidth: 3,
+  dotData: const FlDotData(show: false),
+  belowBarData: BarAreaData(show: true, color: color.withOpacity(0.1)),
+  ),
+  ],
+  ),
+  ),
+  ),
 
-const SizedBox(height: 8),
-const Text(
-'Last 24 hours',
-style: TextStyle(
-fontSize: 12,
-color: Colors.grey,
-),
-),
+  const SizedBox(height: 8),
+  Text(
+  data.length >= 2 ? 'Last 24 hours (${data.length} readings)' : 'Last 24 hours',
+  style: const TextStyle(fontSize: 12, color: Colors.grey),
+  ),
+
 ],
 ),
 );

@@ -165,9 +165,135 @@ class _RecommendationTabState extends State<RecommendationTab> {
                     ),
                     const SizedBox(height: 24),
 
+                    //------------------------------------------------------
+                    // 2. TOP 3 CROPS SECTION  ← NEW SECTION
+                    //------------------------------------------------------
+                    const Text(
+                      'Top 3 Crops',
+                      style: TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 12),
+
+                    if (_recommendation!['top_3_crops'] != null)
+                      ...(_recommendation!['top_3_crops'] as List)
+                          .asMap()
+                          .entries
+                          .map((entry) {
+                        final int index = entry.key;
+                        final item = entry.value as Map;
+                        final String cropName =
+                        (item['crop'] ?? 'Unknown').toString();
+                        final double confidence =
+                        ((item['confidence'] ?? 0) as num).toDouble();
+                        final int percent = (confidence * 100).round();
+
+                        // Medal colors
+                        final List<Color> medalColors = [
+                          const Color(0xFFFFD700), // Gold
+                          const Color(0xFFC0C0C0), // Silver
+                          const Color(0xFFCD7F32), // Bronze
+                        ];
+                        final List<String> medals = ['🥇', '🥈', '🥉'];
+                        final Color color = index < medalColors.length
+                            ? medalColors[index]
+                            : Colors.grey;
+                        // Gold text is too light, darken it
+                        final Color textColor =
+                        index == 0
+                            ? Colors.orange.shade800
+                            : color;
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: color.withOpacity(0.4),
+                                width: 1.5),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.04),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            children: [
+                              // Medal emoji
+                              Text(
+                                index < medals.length
+                                    ? medals[index]
+                                    : '${index + 1}.',
+                                style: const TextStyle(fontSize: 24),
+                              ),
+                              const SizedBox(width: 12),
+
+                              // Crop name + progress bar
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      cropName[0].toUpperCase() +
+                                          cropName.substring(1),
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    ClipRRect(
+                                      borderRadius:
+                                      BorderRadius.circular(4),
+                                      child: LinearProgressIndicator(
+                                        value: confidence,
+                                        backgroundColor:
+                                        Colors.grey.shade200,
+                                        valueColor:
+                                        AlwaysStoppedAnimation<Color>(
+                                            color),
+                                        minHeight: 8,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+
+                              // Confidence badge
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: color.withOpacity(0.15),
+                                  borderRadius:
+                                  BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  '$percent%',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: textColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+
+                    const SizedBox(height: 24),
+
                     // Recommendations Section
                     const Text(
-                      'Recommendations',
+                      'Recommendation Criteria',
                       style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 12),

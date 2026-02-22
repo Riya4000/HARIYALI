@@ -63,6 +63,11 @@ class SensorService extends ChangeNotifier {
       if (event.snapshot.value != null) {
         final data = Map<String, dynamic>.from(event.snapshot.value as Map);
         _currentData = SensorData.fromMap(data);
+        // ← ADD THIS: also append to history list for live chart updates
+        if (_historicalData.length > 200) {
+          _historicalData.removeAt(0);  // Keep max 200 points
+        }
+        _historicalData.add(_currentData!);
         notifyListeners(); // Tell UI to update
       }
     });
@@ -109,22 +114,44 @@ class SensorService extends ChangeNotifier {
       final snapshot = await _database
           .child('history/$_userId')
           .orderByChild('timestamp')
-          .startAt(yesterday.millisecondsSinceEpoch)
+          .startAt(yesterday.millisecondsSinceEpoch.toDouble())
           .get();
 
       if (snapshot.value != null) {
-        final dataMap = Map<String, dynamic>.from(snapshot.value as Map);
-        _historicalData = dataMap.values
-            .map((data) => SensorData.fromMap(Map<String, dynamic>.from(data)))
+        final rawMap = snapshot.value as Map;
+        _historicalData = rawMap.values
+            .map((data) => SensorData.fromMap(Map<String, dynamic>.from(data as Map)))
             .toList();
         _historicalData.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        notifyListeners();
+      } else {
+        // No history yet — seed with some test data so graph is visible
+        _historicalData = _generateTestHistory();
         notifyListeners();
       }
     } catch (e) {
       debugPrint('Error loading historical data: $e');
+      _historicalData = _generateTestHistory();
+      notifyListeners();
     }
   }
 
+  // Generates fake history so graph shows something while waiting for real data
+  List<SensorData> _generateTestHistory() {
+    final now = DateTime.now();
+    return List.generate(20, (i) {
+      return SensorData(
+        temperature:  22.0 + (i % 5),
+        humidity:     60.0 + (i % 10),
+        soilMoisture: 50.0 + (i % 15),
+        pH:           6.5 + (i % 3) * 0.2,
+        nitrogen:     60.0,
+        phosphorus:   40.0,
+        potassium:    50.0,
+        timestamp:    now.subtract(Duration(minutes: (20 - i) * 30)),
+      );
+    });
+  }
   // ============================================================================
   // MANUAL REFRESH
   // ============================================================================
