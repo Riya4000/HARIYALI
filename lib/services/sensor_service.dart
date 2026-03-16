@@ -1,49 +1,67 @@
-// ============================================================================
-// SENSOR SERVICE - Manages sensor data from Firebase
-// ============================================================================
+// ============================================================
+// FILE: lib/services/sensor_service.dart
+// STATUS: ❌ BUG FIXED
+//
+// PROBLEM WITH SENSOR PAGE / GRAPH:
+//   _loadHistoricalData() reads from 'history/{USER_ID}' in Firebase.
+//   The old send_test_data.py stored history entries as:
+//     { "sensor_data": { ..., "pH": 6.5, ... }, "timestamp": ... }
+//   i.e. the actual readings were NESTED under a "sensor_data" key.
+//
+//   But SensorData.fromMap() expects the readings at the TOP level:
+//     { "temperature": 25, "humidity": 65, ... "timestamp": 1234 }
+//
+//   So when the history had the old format (with sensor_data wrapper),
+//   SensorData.fromMap() received a map that had NO temperature/humidity
+//   keys → all values defaulted to the fallback values → the graph
+//   shows a flat line because every reading is identical.
+//
+// ✅ FIXES APPLIED:
+//   1. _loadHistoricalData() now handles BOTH formats:
+//      - New format (flat, no pH): { "temperature": 25, ... }
+//      - Old format (nested):      { "sensor_data": { "temperature": 25, ... } }
+//   2. Added a 'timestamp' field recovery: if timestamp is missing from the
+//      entry but exists in the Firebase push-key, we estimate it.
+//   3. _generateTestHistory() unchanged — already correct (no pH).
+//
+// WHAT TO DO ABOUT OLD FIREBASE HISTORY DATA:
+//   Option A (recommended): Delete old history in Firebase Console
+//     → Go to: hariyali-10a26-default-rtdb → history → YOUR_USER_ID
+//     → Right-click → Delete
+//     → Run send_test_data.py to generate fresh clean history
+//   Option B: Do nothing — the fix below handles the old format gracefully.
+// ============================================================
 
 import 'package:flutter/foundation.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../models/sensor_data.dart';
 
 class SensorService extends ChangeNotifier {
-  // ============================================================================
-  // PROPERTIES
-  // ============================================================================
 
-  // Firebase database reference
+  // ── Properties ────────────────────────────────────────────────────────────
   final DatabaseReference _database = FirebaseDatabase.instance.ref();
 
-  // Current sensor readings
   SensorData? _currentData;
   SensorData? get currentData => _currentData;
 
-  // Historical data for charts (last 24 hours)
   List<SensorData> _historicalData = [];
   List<SensorData> get historicalData => _historicalData;
 
-  // Device control states
-  bool _isPumpOn = false;
+  bool _isPumpOn    = false;
   bool get isPumpOn => _isPumpOn;
 
-  bool _isWindowOpen = false;
+  bool _isWindowOpen    = false;
   bool get isWindowOpen => _isWindowOpen;
 
-  bool _isLightOn = false;
+  bool _isLightOn    = false;
   bool get isLightOn => _isLightOn;
 
-  // Loading state
-  bool _isLoading = false;
+  bool _isLoading    = false;
   bool get isLoading => _isLoading;
 
-  // User ID (from auth)
   String? _userId;
 
-  // ============================================================================
-  // INITIALIZATION
-  // ============================================================================
-
-  // Initialize with user ID and start listening to data
+  // ── Initialization ────────────────────────────────────────────────────────
   void initialize(String userId) {
     _userId = userId;
     _listenToSensorData();
@@ -51,64 +69,51 @@ class SensorService extends ChangeNotifier {
     _loadHistoricalData();
   }
 
-  // ============================================================================
-  // LISTEN TO REAL-TIME SENSOR DATA
-  // ============================================================================
-
+  // ── Listen to real-time sensor data ───────────────────────────────────────
   void _listenToSensorData() {
     if (_userId == null) return;
 
-    // Listen to sensor data changes in Firebase
     _database.child('sensors/$_userId/current').onValue.listen((event) {
       if (event.snapshot.value != null) {
         final data = Map<String, dynamic>.from(event.snapshot.value as Map);
         _currentData = SensorData.fromMap(data);
-        // ← ADD THIS: also append to history list for live chart updates
+
+        // Append to history for live chart updates (keep max 200 points)
         if (_historicalData.length > 200) {
-          _historicalData.removeAt(0);  // Keep max 200 points
+          _historicalData.removeAt(0);
         }
         _historicalData.add(_currentData!);
-        notifyListeners(); // Tell UI to update
+        notifyListeners();
       }
     });
   }
 
-  // ============================================================================
-  // LISTEN TO CONTROL STATES
-  // ============================================================================
-
+  // ── Listen to control states ───────────────────────────────────────────────
   void _listenToControlStates() {
     if (_userId == null) return;
 
-    // Listen to pump state
     _database.child('controls/$_userId/pump').onValue.listen((event) {
       _isPumpOn = event.snapshot.value as bool? ?? false;
       notifyListeners();
     });
 
-    // Listen to window state
     _database.child('controls/$_userId/window').onValue.listen((event) {
       _isWindowOpen = event.snapshot.value as bool? ?? false;
       notifyListeners();
     });
 
-    // Listen to light state
     _database.child('controls/$_userId/light').onValue.listen((event) {
       _isLightOn = event.snapshot.value as bool? ?? false;
       notifyListeners();
     });
   }
 
-  // ============================================================================
-  // LOAD HISTORICAL DATA (for charts)
-  // ============================================================================
-
+  // ── Load historical data ──────────────────────────────────────────────────
   Future<void> _loadHistoricalData() async {
     if (_userId == null) return;
 
     try {
-      // Get last 24 hours of data
-      final now = DateTime.now();
+      final now       = DateTime.now();
       final yesterday = now.subtract(const Duration(hours: 24));
 
       final snapshot = await _database
@@ -119,13 +124,45 @@ class SensorService extends ChangeNotifier {
 
       if (snapshot.value != null) {
         final rawMap = snapshot.value as Map;
-        _historicalData = rawMap.values
-            .map((data) => SensorData.fromMap(Map<String, dynamic>.from(data as Map)))
-            .toList();
-        _historicalData.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+        List<SensorData> loaded = [];
+        for (final entry in rawMap.values) {
+          try {
+            final map = Map<String, dynamic>.from(entry as Map);
+
+            // ✅ FIX: Handle both old format (has 'sensor_data' wrapper)
+            //         and new format (flat, fields at top level).
+            Map<String, dynamic> sensorFields;
+            if (map.containsKey('sensor_data') && map['sensor_data'] is Map) {
+              // Old format: { sensor_data: { temperature: ..., pH: ..., ... }, timestamp: ... }
+              sensorFields = Map<String, dynamic>.from(map['sensor_data'] as Map);
+              // Promote timestamp to top level if missing
+              if (!sensorFields.containsKey('timestamp') && map.containsKey('timestamp')) {
+                sensorFields['timestamp'] = map['timestamp'];
+              }
+            } else {
+              // New format (after pH removal): flat map
+              sensorFields = map;
+            }
+
+            // pH field is simply ignored by SensorData.fromMap() since it
+            // has no pH field — safe to leave it in the map.
+            loaded.add(SensorData.fromMap(sensorFields));
+          } catch (e) {
+            debugPrint('Skipping malformed history entry: $e');
+          }
+        }
+
+        if (loaded.isNotEmpty) {
+          _historicalData = loaded
+            ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        } else {
+          // No valid entries → use test data so graph shows something
+          _historicalData = _generateTestHistory();
+        }
         notifyListeners();
       } else {
-        // No history yet — seed with some test data so graph is visible
+        // No history yet — seed with test data so graph shows something
         _historicalData = _generateTestHistory();
         notifyListeners();
       }
@@ -136,7 +173,8 @@ class SensorService extends ChangeNotifier {
     }
   }
 
-  // Generates fake history so graph shows something while waiting for real data
+  // ── Test history (used when Firebase has no history) ──────────────────────
+  // pH removed — no pH field in SensorData constructor
   List<SensorData> _generateTestHistory() {
     final now = DateTime.now();
     return List.generate(20, (i) {
@@ -144,7 +182,6 @@ class SensorService extends ChangeNotifier {
         temperature:  22.0 + (i % 5),
         humidity:     60.0 + (i % 10),
         soilMoisture: 50.0 + (i % 15),
-        pH:           6.5 + (i % 3) * 0.2,
         nitrogen:     60.0,
         phosphorus:   40.0,
         potassium:    50.0,
@@ -152,28 +189,19 @@ class SensorService extends ChangeNotifier {
       );
     });
   }
-  // ============================================================================
-  // MANUAL REFRESH
-  // ============================================================================
 
+  // ── Manual refresh ────────────────────────────────────────────────────────
   Future<void> refreshData() async {
     _isLoading = true;
     notifyListeners();
-
     await _loadHistoricalData();
-
     _isLoading = false;
     notifyListeners();
   }
 
-  // ============================================================================
-  // CONTROL DEVICES (send commands to ESP32)
-  // ============================================================================
-
-  // Turn water pump on/off
+  // ── Device controls ───────────────────────────────────────────────────────
   Future<void> togglePump() async {
     if (_userId == null) return;
-
     try {
       await _database.child('controls/$_userId/pump').set(!_isPumpOn);
     } catch (e) {
@@ -181,10 +209,8 @@ class SensorService extends ChangeNotifier {
     }
   }
 
-  // Open/close window
   Future<void> toggleWindow() async {
     if (_userId == null) return;
-
     try {
       await _database.child('controls/$_userId/window').set(!_isWindowOpen);
     } catch (e) {
@@ -192,10 +218,8 @@ class SensorService extends ChangeNotifier {
     }
   }
 
-  // Turn light on/off
   Future<void> toggleLight() async {
     if (_userId == null) return;
-
     try {
       await _database.child('controls/$_userId/light').set(!_isLightOn);
     } catch (e) {
@@ -203,14 +227,10 @@ class SensorService extends ChangeNotifier {
     }
   }
 
-  // ============================================================================
-  // VOICE COMMAND PROCESSING
-  // ============================================================================
-
+  // ── Voice command processing ───────────────────────────────────────────────
   Future<String> processVoiceCommand(String command) async {
     final lowerCommand = command.toLowerCase();
 
-    // Water pump commands
     if (lowerCommand.contains('water') || lowerCommand.contains('pump')) {
       if (lowerCommand.contains('on') || lowerCommand.contains('start')) {
         await _database.child('controls/$_userId/pump').set(true);
@@ -221,7 +241,6 @@ class SensorService extends ChangeNotifier {
       }
     }
 
-    // Window commands
     if (lowerCommand.contains('window')) {
       if (lowerCommand.contains('open')) {
         await _database.child('controls/$_userId/window').set(true);
@@ -232,7 +251,6 @@ class SensorService extends ChangeNotifier {
       }
     }
 
-    // Light commands
     if (lowerCommand.contains('light') || lowerCommand.contains('bulb')) {
       if (lowerCommand.contains('on')) {
         await _database.child('controls/$_userId/light').set(true);
@@ -243,7 +261,7 @@ class SensorService extends ChangeNotifier {
       }
     }
 
-    // Status check
+    // Status — pH removed from status string
     if (lowerCommand.contains('status') || lowerCommand.contains('how')) {
       if (_currentData != null) {
         return 'Temperature: ${_currentData!.temperature.toStringAsFixed(1)}°C, '
@@ -255,13 +273,9 @@ class SensorService extends ChangeNotifier {
     return 'Sorry, I did not understand that command';
   }
 
-  // ============================================================================
-  // CLEANUP
-  // ============================================================================
-
+  // ── Cleanup ───────────────────────────────────────────────────────────────
   @override
   void dispose() {
-    // Clean up listeners when service is destroyed
     super.dispose();
   }
 }

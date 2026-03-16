@@ -1,503 +1,270 @@
-# ============================================================================
-# CROP PREDICTION MODEL
-# Uses Random Forest to predict suitable crops based on sensor data
-# ============================================================================
-import pandas as pd
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-import joblib
-import os
-# ============================================================================
-# CROP DATABASE WITH DETAILED INFORMATION
-# ============================================================================
+# =============================================================================
+# HARIYALI - crop_predictor.py (Fixed for dict encoders + correct column names)
+#
+# WHAT WAS WRONG:
+#   1. soil_encoder.pkl and season_encoder.pkl are plain dicts  e.g. {"Loamy": 1}
+#      but the old code called .transform([[value]]) on them → AttributeError
+#   2. Feature columns saved in feature_columns.pkl are:
+#        ['N', 'P', 'K', 'temperature', 'humidity', 'soil_moisture',
+#         'season_encoded', 'soil_type_encoded']
+#      but the old _encode_input() built keys like:
+#        'Temperature', 'Soil_Moisture', 'Phosphorous', 'Soil_Type_enc'  → KeyError
+#
+# FIXES:
+#   - Dict encoders: use  soil_enc[soil_raw]  instead of  .transform(...)
+#   - Column names now exactly match feature_columns.pkl
+# =============================================================================
 
+import os
+import pickle
+import numpy as np
+import pandas as pd
+
+# ── Crop database (tips shown in frontend) ────────────────────────────────────
 CROP_DATABASE = {
-                    'rice': {
-                        'name': 'Rice',
-                        'description': 'Rice thrives in warm, humid conditions with consistent water supply. Ideal for flooded or irrigated fields.',
-                                                              'tips': [
-    'Maintain water level at 5-10 cm during growing season',
-    'Plant in pH range of 5.5-6.5',
-    'Requires high nitrogen (N) levels',
-    'Best temperature: 20-30°C',
-    'Harvest when grains are golden yellow'
-],
-'season': 'Monsoon/Summer',
-'growth_duration': 120
-},
-'maize': {
-    'name': 'Maize (Corn)',
-    'description': 'Maize grows well in warm weather with moderate rainfall. Requires well drained, fertile soil.',
-                          'tips': [
-    'Plant in well-drained loamy soil',
-    'pH range: 5.5-7.0',
-    'Needs moderate nitrogen and phosphorus',
-    'Optimal temperature: 18-27°C',
-    'Space plants 20-30 cm apart'
-],
-'season': 'Spring/Summer',
-'growth_duration': 90
-},
-'chickpea': {
-    'name': 'Chickpea',
-    'description': 'Chickpea is a cool-season legume that improves soil nitrogen. Drought tolerant once established.',
-                              'tips': [
-    'Grows best in cool, dry weather',
-    'pH range: 6.0-7.5',
-    'Low water requirements',
-    'Temperature: 15-25°C',
-    'Rotate with cereal crops for better yield'
-],
-'season': 'Winter',
-'growth_duration': 100
-},
-'kidneybeans': {
-    'name': 'Kidney Beans',
-    'description': 'Kidney beans prefer warm weather and well-drained soil. Good source of protein and soil nitrogen.',
-                              'tips': [
-        'Plant after last frost',
-        'pH range: 6.0-7.0',
-        'Moderate water needs',
-        'Temperature: 18-24°C',
-        'Provide support for climbing varieties'
-    ],
-    'season': 'Spring/Summer',
-    'growth_duration': 65
-},
-'pigeonpeas': {
-    'name': 'Pigeon Peas',
-    'description': 'Pigeon peas are drought-resistant and improve soil fertility. Ideal for tropical and subtropical regions.',
-                                     'tips': [
-        'Very drought tolerant',
-        'pH range: 5.5-7.5',
-        'Fixes nitrogen in soil',
-        'Temperature: 20-30°C',
-        'Can be intercropped with cereals'
-    ],
-    'season': 'Monsoon',
-    'growth_duration': 150
-},
-'mothbeans': {
-    'name': 'Moth Beans',
-    'description': 'Moth beans are extremely drought-resistant legumes. Suitable for arid and semi-arid regions.',
-                                         'tips': [
-    'Requires very little water',
-    'pH range: 6.5-8.0',
-    'Tolerates poor soil',
-    'Temperature: 25-35°C',
-    'Good for crop rotation'
-],
-'season': 'Summer',
-'growth_duration': 75
-},
-'mungbean': {
-    'name': 'Mung Bean',
-    'description': 'Mung beans are fast-growing legumes rich in protein. Ideal for multiple cropping systems.',
-                     'tips': [
-        'Short growing season',
-        'pH range: 6.2-7.2',
-        'Moderate water needs',
-        'Temperature: 25-35°C',
-        'Harvest when pods turn brown'
-    ],
-    'season': 'Summer/Monsoon',
-    'growth_duration': 60
-},
-'blackgram': {
-    'name': 'Black Gram',
-    'description': 'Black gram is a nutritious pulse crop. Grows well in warm, humid conditions.',
-               'tips': [
-    'Prefers loamy soil',
-    'pH range: 6.5-7.5',
-    'Needs good drainage',
-    'Temperature: 25-30°C',
-    'Sensitive to waterlogging'
-],
-'season': 'Monsoon',
-'growth_duration': 70
-},
-'lentil': {
-    'name': 'Lentil',
-    'description': 'Lentils are cool-season legumes rich in protein. Drought-tolerant and nitrogen-fixing.',
-                    'tips': [
-    'Cool weather crop',
-    'pH range: 6.0-8.0',
-    'Low water requirements',
-    'Temperature: 15-25°C',
-    'Avoid waterlogged conditions'
-],
-'season': 'Winter',
-'growth_duration': 110
-},
-'pomegranate': {
-    'name': 'Pomegranate',
-    'description': 'Pomegranate is a drought-tolerant fruit tree. Thrives in semi-arid climates.',
-             'tips': [
-    'Requires well-drained soil',
-    'pH range: 5.5-7.5',
-    'Drought tolerant once established',
-    'Temperature: 15-35°C',
-    'Prune regularly for better fruiting'
-],
-'season': 'Year-round (fruit in fall)',
-'growth_duration': 180
-},
-'banana': {
-    'name': 'Banana',
-    'description': 'Bananas require warm, humid conditions with plenty of water. High nutrient demand.',
-                    'tips': [
-        'Needs continuous water supply',
-        'pH range: 5.5-7.0',
-        'High potassium requirement',
-        'Temperature: 20-30°C',
-        'Protect from strong winds'
-    ],
-    'season': 'Year-round (tropical)',
-    'growth_duration': 270
-},
-'mango': {
-    'name': 'Mango',
-    'description': 'Mango is a tropical fruit tree requiring warm temperatures. Drought tolerant once mature.',
-                         'tips': [
-    'Needs full sunlight',
-    'pH range: 5.5-7.5',
-    'Deep watering in dry season',
-    'Temperature: 24-30°C',
-    'Prune after harvest'
-],
-'season': 'Summer (fruit)',
-'growth_duration': 365
-},
-'grapes': {
-    'name': 'Grapes',
-    'description': 'Grapes require moderate temperatures and well-drained soil. Need support structures.',
-                       'tips': [
-        'Provide trellis support',
-        'pH range: 5.5-7.0',
-        'Moderate water needs',
-        'Temperature: 15-25°C',
-        'Prune in dormant season'
-    ],
-    'season': 'Spring/Summer',
-    'growth_duration': 150
-},
-'watermelon': {
-    'name': 'Watermelon',
-    'description': 'Watermelon needs warm weather and plenty of space. High water requirement during fruiting.',
-                                'tips': [
-    'Requires warm soil to germinate',
-    'pH range: 6.0-7.0',
-    'High water needs during fruiting',
-    'Temperature: 21-30°C',
-    'Mulch to retain moisture'
-],
-'season': 'Summer',
-'growth_duration': 80
-},
-'muskmelon': {
-    'name': 'Muskmelon',
-    'description': 'Muskmelon is a warm-season crop requiring full sun. Sweet and aromatic fruit.',
-                   'tips': [
-        'Plant in full sun',
-        'pH range: 6.0-7.5',
-        'Regular watering until fruiting',
-        'Temperature: 18-30°C',
-        'Harvest when fragrant'
-    ],
-    'season': 'Summer',
-    'growth_duration': 75
-},
-'apple': {
-    'name': 'Apple',
-    'description': 'Apples need cool winters for dormancy and moderate summers. Requires cross-pollination.',
-                               'tips': [
-        'Needs chilling hours in winter',
-        'pH range: 6.0-7.0',
-        'Regular watering',
-        'Temperature: 15-25°C (growing)',
-        'Thin fruits for better size'
-    ],
-    'season': 'Fall (harvest)',
-    'growth_duration': 200
-},
-'orange': {
-    'name': 'Orange',
-    'description': 'Oranges thrive in subtropical climates. Require consistent moisture and nutrients.',
-              'tips': [
-    'Needs full sunlight',
-    'pH range: 6.0-7.5',
-    'Regular irrigation',
-    'Temperature: 15-30°C',
-    'Fertilize regularly'
-],
-'season': 'Winter (fruit)',
-'growth_duration': 270
-},
-'papaya': {
-    'name': 'Papaya',
-    'description': 'Papaya is a fast-growing tropical fruit. Requires warm temperatures year round.',
-          'tips': [
-    'Plant in full sun',
-    'pH range: 6.0-7.0',
-    'Needs good drainage',
-    'Temperature: 21-33°C',
-    'Fruits within first year'
-],
-'season': 'Year-round (tropical)',
-'growth_duration': 180
-},
-'coconut': {
-    'name': 'Coconut',
-    'description': 'Coconut palms thrive in tropical coastal areas. Salt-tolerant and drought resistant.',
-              'tips': [
-    'Needs warm, humid climate',
-    'pH range: 5.0-8.0',
-    'Salt tolerant',
-    'Temperature: 27-32°C',
-    'Takes 6-10 years to fruit'
-],
-'season': 'Year-round',
-'growth_duration': 365
-},
-'cotton': {
-    'name': 'Cotton',
-    'description': 'Cotton requires warm weather and moderate rainfall. Major fiber crop.',
-    'tips': [
-        'Needs long frost-free period',
-        'pH range: 5.5-8.0',
-        'Moderate water needs',
-        'Temperature: 21-30°C',
-        'Harvest when bolls open'
-    ],
-    'season': 'Summer',
-    'growth_duration': 150
-},
-'jute': {
-    'name': 'Jute',
-    'description': 'Jute thrives in warm, humid conditions with heavy rainfall. Important fiber crop.',
-         'tips': [
-    'Needs high humidity',
-    'pH range: 6.0-7.5',
-    'High water requirement',
-    'Temperature: 24-35°C',
-    'Harvest before flowering'
-],
-'season': 'Monsoon',
-'growth_duration': 120
-},
-'coffee': {
-    'name': 'Coffee',
-    'description': 'Coffee grows in tropical highlands. Requires shade and consistent moisture.',
-             'tips': [
-    'Grows well in shade',
-    'pH range: 6.0-6.5',
-    'Regular rainfall needed',
-    'Temperature: 15-24°C',
-    'Takes 3-4 years to first harvest'
-],
-'season': 'Year-round',
-'growth_duration': 365
+    "Rice":        {"season": "Monsoon",       "duration": 120, "notes": "Main cereal in Terai; needs flooded fields and high humidity."},
+    "Paddy":       {"season": "Monsoon",       "duration": 120, "notes": "Paddy thrives in warm, flooded Terai conditions."},
+    "Wheat":       {"season": "Winter",        "duration": 110, "notes": "Plant Oct-Nov; harvest Mar-Apr in well-drained soil."},
+    "Maize":       {"season": "Summer/Monsoon","duration": 90,  "notes": "Suitable for hilly regions; plant Feb-Mar or Jun-Jul."},
+    "Barley":      {"season": "Winter",        "duration": 100, "notes": "Hardy crop; tolerates low temperatures and dry conditions."},
+    "Millets":     {"season": "Summer",        "duration": 75,  "notes": "Drought tolerant; grows in sandy soil with low rainfall."},
+    "Sugarcane":   {"season": "Summer",        "duration": 365, "notes": "12-month crop; high water and nutrient demand."},
+    "Lentil":      {"season": "Winter",        "duration": 110, "notes": "After rice harvest; cool weather; nitrogen-fixing legume."},
+    "Chickpea":    {"season": "Winter",        "duration": 100, "notes": "Drought tolerant once established; improves soil fertility."},
+    "Soybean":     {"season": "Monsoon",       "duration": 90,  "notes": "Fixes nitrogen; plant during monsoon in loamy soil."},
+    "Pulses":      {"season": "Winter",        "duration": 110, "notes": "Protein-rich; grows in cool, dry post-monsoon season."},
+    "Potato":      {"season": "Winter",        "duration": 90,  "notes": "High value; plant Sep-Oct or Feb-Mar in hilly areas."},
+    "Tomato":      {"season": "Winter/Summer", "duration": 70,  "notes": "High value vegetable; needs support stakes; ready in 60-80 days."},
+    "Onion":       {"season": "Winter",        "duration": 120, "notes": "Plant Nov-Dec; harvest when tops fall over."},
+    "Garlic":      {"season": "Winter",        "duration": 120, "notes": "Plant Oct-Nov; harvest when leaves turn yellow."},
+    "Ginger":      {"season": "Monsoon",       "duration": 240, "notes": "Plant Mar-Apr; prefers warm humid conditions with shade."},
+    "Turmeric":    {"season": "Monsoon",       "duration": 270, "notes": "Plant Apr-May; ready in 8-9 months; high humidity needed."},
+    "Ground Nuts": {"season": "Summer",        "duration": 120, "notes": "Drought tolerant; sandy loam soil; harvest 120 days after planting."},
+    "Mustard":     {"season": "Winter",        "duration": 90,  "notes": "Plant Oct-Nov; major oil seed crop; harvest Mar."},
+    "Sunflower":   {"season": "Summer",        "duration": 90,  "notes": "Grows fast; faces the sun; oil and seed crop."},
+    "Oil Seeds":   {"season": "Winter",        "duration": 100, "notes": "Post-monsoon oil crop; low water needs."},
+    "Cotton":      {"season": "Summer",        "duration": 150, "notes": "Warm-season fiber crop; long frost-free period needed."},
+    "Tobacco":     {"season": "Summer",        "duration": 120, "notes": "Well-drained sandy soil; moderate water and nutrients."},
+    "Tea":         {"season": "Monsoon",       "duration": 365, "notes": "Hill crop; acidic-friendly soil; high humidity needed."},
+    "Coffee":      {"season": "Monsoon",       "duration": 365, "notes": "Mid-hills; shade-loving; harvest Nov-Feb."},
 }
-}
-# ============================================================================
-# CROP PREDICTOR CLASS
-# =========================================================================\===
+
+# ── Fallback dicts if pkl encoders are plain dicts ────────────────────────────
+DEFAULT_SOIL_MAP   = {"Sandy": 0, "Loamy": 1, "Clayey": 2, "Red": 3, "Black": 4}
+DEFAULT_SEASON_MAP = {"Winter": 0, "Summer": 1, "Monsoon": 2}
+
 
 class CropPredictor:
-    def __init__(self, csv_path='crop_recommendation_dataset.csv'):
-        """
-        Initialize the crop predictor
-        Args:
-            csv_path: Path to your crop dataset CSV
-        """
-        self.csv_path = csv_path
-        self.model = None
+    """
+    Loads the trained Random Forest model and predicts crop from sensor data.
+    Handles both sklearn OrdinalEncoder objects AND plain dict encoders.
+
+    Sensor data dict keys expected:
+        temperature, humidity, soilMoisture, nitrogen, phosphorus, potassium,
+        soilType (string, optional), season (string, optional)
+    pH is NOT used.
+    """
+
+    MODEL_DIR = "."
+
+    def __init__(self):
+        self.model         = None
         self.label_encoder = None
-        self.feature_columns = ['N', 'P', 'K', 'temperature', 'humidity', 'ph', 'rainfall']
+        self.soil_encoder  = None
+        self.season_encoder= None
+        self.feature_cols  = None
 
-        # ========================================================================
-
+    # ── Load model ────────────────────────────────────────────────────────────
     def load_model(self):
-        pass
+        """Load model and encoders from disk. Returns True on success."""
+        try:
+            mp = self.MODEL_DIR
+            with open(os.path.join(mp, "crop_model.pkl"),      "rb") as f: self.model          = pickle.load(f)
+            with open(os.path.join(mp, "soil_encoder.pkl"),    "rb") as f: self.soil_encoder   = pickle.load(f)
+            with open(os.path.join(mp, "season_encoder.pkl"),  "rb") as f: self.season_encoder = pickle.load(f)
+            with open(os.path.join(mp, "feature_columns.pkl"), "rb") as f: self.feature_cols   = pickle.load(f)
 
-    def predict_crops(self, sensor_data):
-        pass
-
-
-# TRAIN MODEL FROM CSV
-# ========================================================================
-
-def train_model(self):
-    """
-    Train Random Forest model using CSV data
-    """
-    try:
-        print("      Loading dataset from CSV...")
-
-        # Load CSV data
-        df = pd.read_csv(self.csv_path)
-
-        print(f"   Dataset loaded: {len(df)} samples")
-        print(f"         Columns: {df.columns.tolist()}")
-        print(f"     Crops in dataset: {df['label'].unique().tolist()}")
-
-        # Prepare features and labels
-        x = df[self.feature_columns]
-        y = df['label']
-
-        # Encode labels
-        self.label_encoder = LabelEncoder()
-        y_encoded = self.label_encoder.fit_transform(y)
-
-        # Split data
-        x_train, x_test, y_train, y_test = train_test_split(
-            x, y_encoded, test_size=0.2, random_state=42
-        )
-
-        print("         Training Random Forest model...")
-
-        # Train Random Forest
-        self.model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=15,
-            min_samples_split=5,
-            min_samples_leaf=2,
-            random_state=42
-        )
-
-        self.model.fit(x_train, y_train)
-
-        # Calculate accuracy
-        accuracy = self.model.score(x_test, y_test)
-        print(f"   Model trained! Accuracy: {accuracy * 100:.2f}%")
-
-        # Save model
-        self.save_model()
-
-        return True
-
-    except Exception as e:
-        print(f"  Error training model: {e}")
-        return False
-
-        # ========================================================================
-# SAVE MODEL
-# ========================================================================
-
-def save_model(self):
-    """
-    Save trained model to disk
-    """
-    try:
-        os.makedirs('models', exist_ok=True)
-
-        joblib.dump(self.model, 'models/crop_model.pkl')
-        joblib.dump(self.label_encoder, 'models/label_encoder.pkl')
-
-        print("       Model saved successfully!")
-
-    except Exception as e:
-        print(f"  Error saving model: {e}")
-
-        # ========================================================================
-# LOAD MODEL
-# ========================================================================
-
-def load_model(self):
-    """
-    Load trained model from disk
-    """
-    try:
-        if os.path.exists('models/crop_model.pkl'):
-            self.model = joblib.load('models/crop_model.pkl')
-            self.label_encoder = joblib.load('models/label_encoder.pkl')
-            print("   Model loaded successfully!")
+            # ✅ FIX: label_encoder.pkl classes don't match the model's actual
+            # class indices — causes "unseen labels" error for Turmeric, Sugarcane etc.
+            # Solution: rebuild a correct LabelEncoder directly from model.classes_
+            # which is always in sync with the trained model. The pkl is ignored.
+            from sklearn.preprocessing import LabelEncoder
+            self.label_encoder = LabelEncoder()
+            self.label_encoder.classes_ = self.model.classes_
+            print(f"  [CropPredictor] Model loaded  | features: {list(self.feature_cols)}")
+            print(f"  [CropPredictor] Label classes | {list(self.label_encoder.classes_)}")
+            print(f"  [CropPredictor] Soil encoder  | type: {type(self.soil_encoder).__name__}")
+            print(f"  [CropPredictor] Season encoder| type: {type(self.season_encoder).__name__}")
             return True
+        except FileNotFoundError:
+            print("  [CropPredictor] ❌ Model files not found. Run train_model.py first.")
+            return False
+        except Exception as e:
+            print(f"  [CropPredictor] ❌ Error loading model: {e}")
+            return False
+
+    # ── Encode a single value using either a dict or OrdinalEncoder ──────────
+    def _encode_value(self, encoder, value, fallback_map, fallback_default=0):
+        """
+        Works with both:
+          - plain dict  e.g. {"Loamy": 1, "Sandy": 0}
+          - sklearn OrdinalEncoder  (has .transform method)
+        Returns an integer encoding.
+        """
+        if isinstance(encoder, dict):
+            # Plain dict encoder saved by train_model.py
+            result = encoder.get(value)
+            if result is None:
+                # Try case-insensitive match
+                for k, v in encoder.items():
+                    if k.lower() == value.lower():
+                        return v
+                # Not found — use fallback map
+                print(f"  [CropPredictor] ⚠️  '{value}' not in encoder dict {list(encoder.keys())} — using fallback")
+                return fallback_map.get(value, fallback_default)
+            return result
         else:
-            print("    No saved model found. Training new model...")
-            return self.train_model()
+            # sklearn OrdinalEncoder or LabelEncoder
+            try:
+                return encoder.transform([[value]])[0][0]
+            except Exception:
+                return fallback_map.get(value, fallback_default)
 
-    except Exception as e:
-        print(f"  Error loading model: {e}")
-        return False
+    # ── Build feature DataFrame ───────────────────────────────────────────────
+    def _encode_input(self, sensor_data: dict) -> pd.DataFrame:
+        """
+        Convert raw sensor dict into a feature DataFrame that matches
+        the exact column names saved in feature_columns.pkl.
 
-        # ========================================================================
-# PREDICT CROPS
-# ========================================================================
+        feature_columns.pkl contains:
+            ['N', 'P', 'K', 'temperature', 'humidity', 'soil_moisture',
+             'season_encoded', 'soil_type_encoded']
+        """
+        soil_raw   = sensor_data.get("soilType", "Loamy")
+        season_raw = sensor_data.get("season",   "Summer")
 
-def predict_crops(self, sensor_data):
-    """
-    Predict suitable crops based on sensor data
-    Args:
-        sensor_data: Dictionary with sensor values
-    Returns:
-        List of crop recommendations
-        :param sensor_data: 
-        :param self: 
-    """
-    try:
-        # Ensure model is loaded
-        if self.model is None:
-            self.load_model()
+        soil_enc_val   = self._encode_value(self.soil_encoder,   soil_raw,   DEFAULT_SOIL_MAP,   1)
+        season_enc_val = self._encode_value(self.season_encoder, season_raw, DEFAULT_SEASON_MAP, 1)
 
-            # Prepare input features
-        # Map sensor data to model features
-        features = np.array([[
-            sensor_data.get('nitrogen', 40),     # N
-            sensor_data.get('phosphorus', 35),   # P
-            sensor_data.get('potassium', 42),    # K
-            sensor_data.get('temperature', 25),  # temperature
-            sensor_data.get('humidity', 65),     # humidity
-            sensor_data.get('pH', 6.8),          # ph
-            50  # rainfall (mock value since not in greenhouse)
-        ]])
+        # ✅ KEY FIX: column names must exactly match feature_columns.pkl
+        # Your pkl has: ['N', 'P', 'K', 'temperature', 'humidity',
+        #                'soil_moisture', 'season_encoded', 'soil_type_encoded']
+        row = {
+            "N":                float(sensor_data.get("nitrogen",     60)),
+            "P":                float(sensor_data.get("phosphorus",   40)),
+            "K":                float(sensor_data.get("potassium",    40)),
+            "temperature":      float(sensor_data.get("temperature",  25.0)),
+            "humidity":         float(sensor_data.get("humidity",     60.0)),
+            "soil_moisture":    float(sensor_data.get("soilMoisture", 50.0)),
+            "season_encoded":   float(season_enc_val),
+            "soil_type_encoded":float(soil_enc_val),
+        }
 
-        print(f"    Input features: {features}")
+        df = pd.DataFrame([row])
 
-        # Get prediction probabilities
-        probabilities = self.model.predict_proba(features)[0]
+        # Reorder to exactly match training order
+        try:
+            return df[list(self.feature_cols)]
+        except KeyError as e:
+            print(f"  [CropPredictor] ❌ Column mismatch: {e}")
+            print(f"      Built columns   : {list(df.columns)}")
+            print(f"      Expected columns: {list(self.feature_cols)}")
+            raise
 
-        # Get crop names
-        crop_names = self.label_encoder.classes_
+    # ── Predict ───────────────────────────────────────────────────────────────
+    def predict_crops(self, sensor_data: dict) -> dict | None:
+        """
+        Predict crop and return recommendation dict.
+        Returns None on failure.
+        """
+        try:
+            if self.model is None:
+                if not self.load_model():
+                    return None
 
-        # Create list of predictions with confidence
-        predictions = []
-        for i, prob in enumerate(probabilities):
-            crop_name = crop_names[i]
+            features   = self._encode_input(sensor_data)
+            pred_enc   = self.model.predict(features)[0]
+            proba      = self.model.predict_proba(features)[0]
+            confidence = float(proba.max())
 
-            # Get crop info from database
-            crop_key = crop_name.lower()
-            crop_info = CROP_DATABASE.get(crop_key, {
-                'name': crop_name,
-                'description': f'{crop_name} is suitable for your conditions.',
-                'tips': ['Water regularly', 'Provide adequate sunlight', 'Monitor for pests'],
-                'season': 'Year-round',
-                'growth_duration': 90
-            })
+            # ✅ FIX: model.predict() already returns the crop name as a string
+            # (model was trained with string labels directly).
+            # inverse_transform() is NOT needed and crashes when given a string.
+            crop = str(pred_enc)
 
-            predictions.append({
-                'crop_name': crop_info['name'],
-                'confidence': float(prob),
-                'description': crop_info['description'],
-                'tips': crop_info['tips'],
-                'season': crop_info['season'],
-                'growth_duration': crop_info['growth_duration']
-            })
+            top3_idx = np.argsort(proba)[-3:][::-1]
+            top3 = [
+                {"crop": str(self.model.classes_[i]), "confidence": float(proba[i])}
+                for i in top3_idx
+            ]
 
-            # Sort by confidence (highest first)
-        predictions.sort(key=lambda x: x['confidence'], reverse=True)
+            recommendations = self._get_recommendations(
+                crop     = crop,
+                N        = sensor_data.get("nitrogen",     60),
+                P        = sensor_data.get("phosphorus",   40),
+                K        = sensor_data.get("potassium",    40),
+                moisture = sensor_data.get("soilMoisture", 50),
+                temp     = sensor_data.get("temperature",  25),
+                humidity = sensor_data.get("humidity",     60),
+            )
 
-        # Return top 5
-        top_predictions = predictions[:5]
+            return {
+                "recommended_crop": crop,
+                "confidence":       confidence,
+                "top_3_crops":      top3,
+                "recommendations":  recommendations,
+                "status":           "success",
+            }
 
-        print(f"   Top predictions:")
-        for pred in top_predictions:
-            print(f"   - {pred['crop_name']}: {pred['confidence']*100:.1f}%")
+        except Exception as e:
+            print(f"  [CropPredictor] ❌ Prediction error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
-        return top_predictions
+    # ── Build agronomic advice ────────────────────────────────────────────────
+    def _get_recommendations(self, crop, N, P, K, moisture, temp, humidity) -> dict:
+        """Generate actionable recommendations. pH section removed."""
+        rec = {"crop": crop, "fertilizer": "", "irrigation": "", "climate": "", "notes": ""}
 
-    except Exception as e:
-        print(f"  Error making prediction: {e}")
-        return []
+        # Fertilizer
+        if N < 40:
+            rec["fertilizer"] = "Low nitrogen: add Urea or Ammonium Sulfate fertilizer."
+        elif N > 110:
+            rec["fertilizer"] = "High nitrogen: avoid additional nitrogen fertilizers."
+        elif P < 30:
+            rec["fertilizer"] = "Low phosphorus: apply DAP or TSP fertilizer."
+        elif K < 30:
+            rec["fertilizer"] = "Low potassium: apply MOP or SOP fertilizer."
+        else:
+            rec["fertilizer"] = "Soil nutrients N, P, K are well-balanced."
+
+        # Irrigation
+        if moisture < 30:
+            rec["irrigation"] = "Critical: increase watering immediately."
+        elif moisture < 50:
+            rec["irrigation"] = "Increase watering frequency."
+        elif moisture > 80:
+            rec["irrigation"] = "Reduce watering — soil is near waterlogged."
+        else:
+            rec["irrigation"] = "Soil moisture is optimal."
+
+        # Climate
+        if temp < 15:
+            rec["climate"] = "Low temperature — consider greenhouse covering or wait for warmer weather."
+        elif temp > 35:
+            rec["climate"] = "High temperature — provide shade and increase irrigation."
+        elif humidity < 40:
+            rec["climate"] = "Low humidity — mulching can help retain soil moisture."
+        elif humidity > 90:
+            rec["climate"] = "Very high humidity — ensure ventilation to prevent fungal diseases."
+        else:
+            rec["climate"] = "Climate conditions are favorable."
+
+        # Notes from crop database
+        info          = CROP_DATABASE.get(crop, {})
+        rec["notes"]  = info.get("notes",    f"{crop} is suitable for current conditions.")
+        rec["season"] = info.get("season",   "")
+        rec["duration"] = info.get("duration", "")
+
+        return rec

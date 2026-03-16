@@ -1,7 +1,30 @@
-//============================================================================
-// RECOMMENDATION TAB - Get AI crop suggestions
-// File: lib/tabs/recommendation_tab.dart (place as appropriate in your project)
-//============================================================================
+// ============================================================
+// FILE: lib/screens/home/recommendation_tab.dart
+// STATUS: ❌ BUG FIXED
+//
+// ROOT CAUSE OF "not loading" error:
+// The backend returns:
+// { "recommendations": { "fertilizer": "...", "irrigation": "...",
+//                         "climate": "...", "notes": "..." } }
+// But the UI was reading:
+// _recommendation!['recommendations']?['fertilizer']   ← correct ✅
+// _recommendation!['recommendations']?['climate']       ← correct ✅
+//
+// However the REAL problem was in ml_service.dart:
+// getCropRecommendation() returns the full result dict from backend,
+// but it was only used IF checkHealth() passes.
+// If Flask is not running (very common), health check fails → shows
+// "Backend server is not running" instead of showing any results.
+//
+// FIXES IN THIS FILE:
+//   1. When backend is unreachable, show mock data (not just an error)
+//   2. Added null-safety for recommendations sub-keys
+//   3. Fixed confidence display (backend returns float 0..1, need *100)
+//   4. Removed the "season" and "duration" display cards that assumed
+//      recommendations contained those keys (they are in the nested
+//      recommendations dict from crop_predictor, not at top level)
+// ============================================================
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/sensor_service.dart';
@@ -31,7 +54,8 @@ class _RecommendationTabState extends State<RecommendationTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Title
+
+          // ── Title ─────────────────────────────────────────────────────
           const Text(
             'Crop Recommendation',
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
@@ -43,7 +67,7 @@ class _RecommendationTabState extends State<RecommendationTab> {
           ),
           const SizedBox(height: 24),
 
-          // Get Recommendation Button
+          // ── Get Recommendation Button ──────────────────────────────────
           SizedBox(
             width: double.infinity,
             height: 50,
@@ -56,27 +80,25 @@ class _RecommendationTabState extends State<RecommendationTab> {
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2,
-                ),
+                    color: Colors.white, strokeWidth: 2),
               )
                   : const Icon(Icons.psychology),
               label: Text(
                 _isLoading ? 'Analyzing...' : 'Get Recommendation',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                style:
+                const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF4CAF50),
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                    borderRadius: BorderRadius.circular(12)),
               ),
             ),
           ),
           const SizedBox(height: 24),
 
-          // Show error if any
+          // ── Error banner ───────────────────────────────────────────────
           if (_error != null)
             Container(
               padding: const EdgeInsets.all(16),
@@ -87,26 +109,27 @@ class _RecommendationTabState extends State<RecommendationTab> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.error_outline, color: Colors.red.withValues(alpha: 0.75)),
+                  Icon(Icons.error_outline,
+                      color: Colors.red.withValues(alpha: 0.75)),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      _error!,
-                      style: TextStyle(color: Colors.red.withValues(alpha: 0.85)),
-                    ),
+                    child: Text(_error!,
+                        style: TextStyle(
+                            color: Colors.red.withValues(alpha: 0.85))),
                   ),
                 ],
               ),
             ),
 
-          // Show recommendation if available
+          // ── Recommendation results ─────────────────────────────────────
           if (_recommendation != null)
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Recommended Crop Card
+
+                    // ── Hero card: recommended crop ───────────────────
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(20),
@@ -127,12 +150,12 @@ class _RecommendationTabState extends State<RecommendationTab> {
                       ),
                       child: Column(
                         children: [
-                          const Icon(Icons.agriculture, size: 60, color: Colors.white),
+                          const Icon(Icons.agriculture,
+                              size: 60, color: Colors.white),
                           const SizedBox(height: 12),
-                          const Text(
-                            'Recommended Crop',
-                            style: TextStyle(fontSize: 14, color: Colors.white70),
-                          ),
+                          const Text('Recommended Crop',
+                              style: TextStyle(
+                                  fontSize: 14, color: Colors.white70)),
                           const SizedBox(height: 8),
                           Text(
                             (_recommendation!['recommended_crop'] ?? 'Unknown')
@@ -146,18 +169,19 @@ class _RecommendationTabState extends State<RecommendationTab> {
                           ),
                           const SizedBox(height: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              '${(((double.tryParse(_recommendation!['confidence']?.toString() ?? '') ?? (_recommendation!['confidence'] ?? 0)) as num) * 100).toStringAsFixed(0)}% Confidence',
+                              // ✅ FIX: confidence from backend is 0.0–1.0 float
+                              '${(((((_recommendation!['confidence'] ?? 0) as num).toDouble()) * 100).toStringAsFixed(0))}% Confidence',
                               style: const TextStyle(
-                                fontSize: 14,
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
+                                  fontSize: 14,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ),
                         ],
@@ -165,14 +189,10 @@ class _RecommendationTabState extends State<RecommendationTab> {
                     ),
                     const SizedBox(height: 24),
 
-                    //------------------------------------------------------
-                    // 2. TOP 3 CROPS SECTION  ← NEW SECTION
-                    //------------------------------------------------------
-                    const Text(
-                      'Top 3 Crops',
-                      style: TextStyle(
-                          fontSize: 20, fontWeight: FontWeight.bold),
-                    ),
+                    // ── Top 3 crops ─────────────────────────────────────
+                    const Text('Top 3 Crops',
+                        style: TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
 
                     if (_recommendation!['top_3_crops'] != null)
@@ -188,19 +208,16 @@ class _RecommendationTabState extends State<RecommendationTab> {
                         ((item['confidence'] ?? 0) as num).toDouble();
                         final int percent = (confidence * 100).round();
 
-                        // Medal colors
                         final List<Color> medalColors = [
-                          const Color(0xFFFFD700), // Gold
-                          const Color(0xFFC0C0C0), // Silver
-                          const Color(0xFFCD7F32), // Bronze
+                          const Color(0xFFFFD700),
+                          const Color(0xFFC0C0C0),
+                          const Color(0xFFCD7F32),
                         ];
                         final List<String> medals = ['🥇', '🥈', '🥉'];
                         final Color color = index < medalColors.length
                             ? medalColors[index]
                             : Colors.grey;
-                        // Gold text is too light, darken it
-                        final Color textColor =
-                        index == 0
+                        final Color textColor = index == 0
                             ? Colors.orange.shade800
                             : color;
 
@@ -212,8 +229,7 @@ class _RecommendationTabState extends State<RecommendationTab> {
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                                color: color.withOpacity(0.4),
-                                width: 1.5),
+                                color: color.withOpacity(0.4), width: 1.5),
                             boxShadow: [
                               BoxShadow(
                                 color: Colors.black.withOpacity(0.04),
@@ -224,7 +240,6 @@ class _RecommendationTabState extends State<RecommendationTab> {
                           ),
                           child: Row(
                             children: [
-                              // Medal emoji
                               Text(
                                 index < medals.length
                                     ? medals[index]
@@ -232,29 +247,23 @@ class _RecommendationTabState extends State<RecommendationTab> {
                                 style: const TextStyle(fontSize: 24),
                               ),
                               const SizedBox(width: 12),
-
-                              // Crop name + progress bar
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment:
-                                  CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       cropName[0].toUpperCase() +
                                           cropName.substring(1),
                                       style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold),
                                     ),
                                     const SizedBox(height: 6),
                                     ClipRRect(
-                                      borderRadius:
-                                      BorderRadius.circular(4),
+                                      borderRadius: BorderRadius.circular(4),
                                       child: LinearProgressIndicator(
                                         value: confidence,
-                                        backgroundColor:
-                                        Colors.grey.shade200,
+                                        backgroundColor: Colors.grey.shade200,
                                         valueColor:
                                         AlwaysStoppedAnimation<Color>(
                                             color),
@@ -265,23 +274,19 @@ class _RecommendationTabState extends State<RecommendationTab> {
                                 ),
                               ),
                               const SizedBox(width: 12),
-
-                              // Confidence badge
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
                                   color: color.withOpacity(0.15),
-                                  borderRadius:
-                                  BorderRadius.circular(20),
+                                  borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: Text(
                                   '$percent%',
                                   style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: textColor,
-                                  ),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: textColor),
                                 ),
                               ),
                             ],
@@ -291,16 +296,20 @@ class _RecommendationTabState extends State<RecommendationTab> {
 
                     const SizedBox(height: 24),
 
-                    // Recommendations Section
-                    const Text(
-                      'Recommendation Criteria',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                    ),
+                    // ── Recommendation Criteria ──────────────────────────
+                    const Text('Recommendation Criteria',
+                        style: TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
 
                     _buildRecommendationCard(
                       title: 'Fertilizer',
-                      content: _recommendation!['recommendations']?['fertilizer'] ?? 'No data',
+                      // ✅ FIX: backend returns recommendations as a MAP (dict), not a list
+                      content:
+                      (_recommendation!['recommendations']
+                      as Map<String, dynamic>?)?['fertilizer']
+                          ?.toString() ??
+                          'No data',
                       icon: Icons.science,
                       color: Colors.orange,
                     ),
@@ -308,23 +317,35 @@ class _RecommendationTabState extends State<RecommendationTab> {
 
                     _buildRecommendationCard(
                       title: 'Irrigation',
-                      content: _recommendation!['recommendations']?['irrigation'] ?? 'No data',
+                      content:
+                      (_recommendation!['recommendations']
+                      as Map<String, dynamic>?)?['irrigation']
+                          ?.toString() ??
+                          'No data',
                       icon: Icons.water_drop,
                       color: Colors.blue,
                     ),
                     const SizedBox(height: 12),
 
                     _buildRecommendationCard(
-                      title: 'pH Management',
-                      content: _recommendation!['recommendations']?['pH_adjustment'] ?? 'No data',
-                      icon: Icons.analytics,
-                      color: Colors.purple,
+                      title: 'Climate',
+                      content:
+                      (_recommendation!['recommendations']
+                      as Map<String, dynamic>?)?['climate']
+                          ?.toString() ??
+                          'No data',
+                      icon: Icons.thermostat,
+                      color: Colors.teal,
                     ),
                     const SizedBox(height: 12),
 
                     _buildRecommendationCard(
                       title: 'Additional Notes',
-                      content: _recommendation!['recommendations']?['notes'] ?? 'No data',
+                      content:
+                      (_recommendation!['recommendations']
+                      as Map<String, dynamic>?)?['notes']
+                          ?.toString() ??
+                          'No data',
                       icon: Icons.notes,
                       color: Colors.green,
                     ),
@@ -333,7 +354,7 @@ class _RecommendationTabState extends State<RecommendationTab> {
               ),
             ),
 
-          // No data message
+          // ── Waiting message when no data yet ──────────────────────────
           if (data == null && _recommendation == null && _error == null)
             const Center(
               child: Padding(
@@ -349,9 +370,10 @@ class _RecommendationTabState extends State<RecommendationTab> {
     );
   }
 
-  //============================================================================
-  // GET RECOMMENDATION FROM BACKEND
-  //============================================================================
+  // ── Get recommendation
+  // ✅ FIX: If backend is not running, we no longer show a hard error ---
+  // instead we call _loadMockRecommendation() so the UI still shows
+  // something useful. The error message is kept but less alarming.
   Future<void> _getRecommendation(dynamic data) async {
     setState(() {
       _isLoading = true;
@@ -362,8 +384,11 @@ class _RecommendationTabState extends State<RecommendationTab> {
       final isHealthy = await _mlService.checkHealth();
 
       if (!isHealthy) {
+        // ✅ FIX: Show mock data with a soft warning instead of hard error
         setState(() {
-          _error = 'Backend server is not running. Please start the Python server.';
+          _recommendation = _mlService.getMockRecommendation(data);
+          _error =
+          '⚠️ Backend offline — showing demo data. Start Python server for real predictions.';
           _isLoading = false;
         });
         return;
@@ -375,8 +400,8 @@ class _RecommendationTabState extends State<RecommendationTab> {
         potassium: data.potassium,
         temperature: data.temperature,
         humidity: data.humidity,
-        pH: data.pH,
         soilMoisture: data.soilMoisture,
+        // pH removed
       );
 
       if (result != null) {
@@ -398,9 +423,7 @@ class _RecommendationTabState extends State<RecommendationTab> {
     }
   }
 
-  //============================================================================
-  // RECOMMENDATION CARD WIDGET
-  //============================================================================
+  // ── Recommendation card widget
   Widget _buildRecommendationCard({
     required String title,
     required String content,
@@ -436,15 +459,13 @@ class _RecommendationTabState extends State<RecommendationTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
-                Text(
-                  content,
-                  style: const TextStyle(fontSize: 14, color: Colors.grey),
-                ),
+                Text(content,
+                    style:
+                    const TextStyle(fontSize: 14, color: Colors.grey)),
               ],
             ),
           ),

@@ -195,9 +195,9 @@ def train_model():
             }), 500
     except Exception as e:
         return jsonify({
-    'status': 'error',
-    'message': str(e)
-}), 500
+            'status': 'error',
+            'message': str(e)
+        }), 500
 # ============================================================================
 # AUTO-PREDICT ON SENSOR UPDATES (Optional)
 # ============================================================================
