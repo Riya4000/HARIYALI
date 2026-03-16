@@ -1,6 +1,5 @@
 # Miscellaneous
 *.class
-*.log
 *.pyc
 *.swp
 .DS_Store
@@ -32,6 +31,9 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+.flutter-plugins
+.packages
+pubspec.lock
 
 # Symbolication related
 app.*.symbols
@@ -46,6 +48,84 @@ app.*.map.json
 
 #backend
 /backend/serviceAccountKey.json
-*.pkl
 *.png
-outputs/
+/backend/outputs
+
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# ── Virtual environments ───────────────────────────────────
+venv/
+env/
+ENV/
+.venv/
+.env
+
+# ── ML model file (large binary — regenerate with train_model.py) ──
+*.pkl
+*.pickle
+*.joblib
+*.h5
+*.hdf5
+
+# ── Generated chart images (regenerate with train_model.py) ───────
+epoch_accuracy.png
+epoch_error.png
+confusion_matrix.png
+decision_tree_rice.png
+feature_importance.png
+
+# ── Dataset (large file — download from Kaggle separately) ────────
+*.csv
+crop_recommendation_dataset.csv
+
+# ── IDE / Editor ───────────────────────────────────────────
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+Thumbs.db
+
+
+
+# Flutter generated files
+*.g.dart
+*.freezed.dart
+*.mocks.dart
+
+# ── Firebase ───────────────────────────────────────────────
+# NEVER upload these — they contain secret keys
+google-services.json
+GoogleService-Info.plist
+firebase_options.dart
+.firebaserc
+firebase.json
+serviceAccountKey.json
+*.env
+.env.*
+
+# ── Node / npm (if any scripts use it) ────────────────────
+node_modules/
+npm-debug.log*
+
+# ── Logs ───────────────────────────────────────────────────
+*.log
+logs/
