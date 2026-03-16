@@ -46,3 +46,6 @@ app.*.map.json
 
 #backend
 /backend/serviceAccountKey.json
+*.pkl
+*.png
+outputs/
