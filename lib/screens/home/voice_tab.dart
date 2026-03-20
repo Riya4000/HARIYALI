@@ -1,11 +1,13 @@
 // ============================================================
 // FILE: lib/screens/home/voice_tab.dart
-// Design: chat bubbles + pulse mic (first version)
-// FIX: Full-width centering at all times.
-//   - Column uses mainAxisAlignment.center equivalent via
-//     wrapping in a ConstrainedBox + Center so the mic+header
-//     are always vertically & horizontally centred on the screen.
-//   - Commands section stays left-aligned but is forced full width.
+// UPDATED: Auto mode awareness added.
+//   • In MANUAL mode → pump & window voice commands work exactly as before
+//   • In AUTO mode   → pump & window commands are blocked;
+//                      the assistant speaks and shows a message explaining
+//                      that auto mode is active
+//   • Status, crop recommendation commands work in BOTH modes
+// All original fixes (no-delay bubble, exact state set, 5 chips,
+// mounted checks) are preserved.
 // ============================================================
 
 import 'package:flutter/material.dart';
@@ -41,6 +43,11 @@ class _VoiceTabState extends State<VoiceTab>
   @override
   void dispose() {
     _pulseController.dispose();
+    // Stop mic if user navigates away — prevents setState after dispose
+    try {
+      final voiceService = Provider.of<VoiceService>(context, listen: false);
+      if (voiceService.isListening) voiceService.stopListening();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -51,32 +58,42 @@ class _VoiceTabState extends State<VoiceTab>
         return SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-            // KEY FIX: use a full-width SizedBox so the inner Column
-            // stretches across the entire screen width.
             child: SizedBox(
               width: double.infinity,
               child: Column(
-                // Center everything horizontally
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
 
-                  // ── Page Header ────────────────────────────────────
+                  // ── Page Header ──────────────────────────────────────────
                   _buildPageHeader(),
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 16),
 
-                  // ── Mic Button ─────────────────────────────────────
+                  // ── AUTO MODE WARNING BANNER ─────────────────────────────
+                  // Shown only when auto mode is active so user knows
+                  // device commands will be rejected
+                  if (sensorService.isAutoMode) ...[
+                    _buildAutoModeBanner(),
+                    const SizedBox(height: 16),
+                  ],
+
+                  const SizedBox(height: 24),
+
+                  // ── Mic Button ───────────────────────────────────────────
                   _buildMicButton(voiceService, sensorService),
                   const SizedBox(height: 24),
 
-                  // ── State Label ────────────────────────────────────
+                  // ── State Label ──────────────────────────────────────────
                   _buildStateLabel(voiceService.isListening),
                   const SizedBox(height: 28),
 
-                  // ── Chat Bubbles ───────────────────────────────────
+                  // ── Chat Bubbles ─────────────────────────────────────────
+                  // User bubble reads voiceService.recognizedText directly
+                  // — updates LIVE as user speaks via notifyListeners()
                   if (voiceService.recognizedText.isNotEmpty)
                     _buildChatBubble(
                       voiceService.recognizedText,
                       isUser: true,
+                      isPartial: voiceService.isListening,
                     ),
                   if (_lastResponse != null) ...[
                     const SizedBox(height: 10),
@@ -84,7 +101,7 @@ class _VoiceTabState extends State<VoiceTab>
                   ],
                   const SizedBox(height: 32),
 
-                  // ── Commands ───────────────────────────────────────
+                  // ── Commands ─────────────────────────────────────────────
                   _buildCommandsSection(voiceService, sensorService),
                 ],
               ),
@@ -92,6 +109,31 @@ class _VoiceTabState extends State<VoiceTab>
           ),
         );
       },
+    );
+  }
+
+  // ── AUTO MODE BANNER ───────────────────────────────────────────────────────
+  Widget _buildAutoModeBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.shade200, width: 1.5),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.smart_toy_rounded, color: Colors.blue.shade700, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Auto mode is ON. Device commands (pump, window) are controlled '
+                  'by the ESP32. Switch to Manual in the Controls tab to use voice control.',
+              style: TextStyle(fontSize: 13, color: Colors.blue.shade800),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -115,37 +157,73 @@ class _VoiceTabState extends State<VoiceTab>
   }
 
   // ── Mic Button ─────────────────────────────────────────────────────────────
-  Widget _buildMicButton(VoiceService voiceService, SensorService sensorService) {
+  Widget _buildMicButton(
+      VoiceService voiceService, SensorService sensorService) {
     return GestureDetector(
       onTap: () async {
         if (voiceService.isListening) {
           await voiceService.stopListening();
         } else {
+          // Clear previous response when starting fresh
+          if (mounted) setState(() => _lastResponse = null);
+
           await voiceService.startListening(
             onResult: (text) async {
               final result = voiceService.processCommand(text);
+              final action = result['action'] as String;
 
-              if (result['action'] == 'pump') {
-                await sensorService.togglePump();
-              } else if (result['action'] == 'window') {
-                await sensorService.toggleWindow();
-              } else if (result['action'] == 'light') {
-                await sensorService.toggleLight();
-              } else if (result['action'] == 'status') {
+              // ── PUMP command ───────────────────────────────────────────
+              if (action == 'pump') {
+                if (sensorService.isAutoMode) {
+                  // AUTO MODE: block and inform the user
+                  const msg =
+                      'Cannot control the pump. Auto mode is active. '
+                      'Please switch to Manual mode first.';
+                  if (mounted) setState(() => _lastResponse = msg);
+                  await voiceService.speak(msg);
+                  return;
+                }
+                // MANUAL MODE: execute normally
+                await sensorService.setPump(result['state'] as bool);
+              }
+
+              // ── WINDOW command ─────────────────────────────────────────
+              else if (action == 'window') {
+                if (sensorService.isAutoMode) {
+                  // AUTO MODE: block and inform the user
+                  const msg =
+                      'Cannot control the window. Auto mode is active. '
+                      'Please switch to Manual mode first.';
+                  if (mounted) setState(() => _lastResponse = msg);
+                  await voiceService.speak(msg);
+                  return;
+                }
+                // MANUAL MODE: execute normally
+                await sensorService.setWindow(result['state'] as bool);
+              }
+
+              // ── STATUS command — works in both modes ───────────────────
+              else if (action == 'status') {
                 final data = sensorService.currentData;
                 if (data != null) {
+                  final modeLabel =
+                  sensorService.isAutoMode ? 'Auto' : 'Manual';
                   final msg =
-                      'Temperature is ${data.temperature.toStringAsFixed(1)}°C. '
-                      'Humidity is ${data.humidity.toStringAsFixed(1)}%. '
-                      'Soil moisture is ${data.soilMoisture.toStringAsFixed(1)}%.';
-                  setState(() => _lastResponse = msg);
+                      'Temperature is ${data.temperature.toStringAsFixed(1)} degrees Celsius. '
+                      'Humidity is ${data.humidity.toStringAsFixed(1)} percent. '
+                      'Soil moisture is ${data.soilMoisture.toStringAsFixed(1)} percent. '
+                      'System is in $modeLabel mode.';
+                  if (mounted) setState(() => _lastResponse = msg);
                   await voiceService.speak(msg);
                   return;
                 }
               }
 
-              setState(() => _lastResponse = result['message']);
-              await voiceService.speak(result['message']);
+              // ── All other commands (recommend, unknown) — works in both modes
+              if (mounted) {
+                setState(() => _lastResponse = result['message'] as String);
+              }
+              await voiceService.speak(result['message'] as String);
             },
           );
         }
@@ -205,9 +283,8 @@ class _VoiceTabState extends State<VoiceTab>
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
-            color: isListening
-                ? const Color(0xFF4CAF50)
-                : Colors.grey.shade500,
+            color:
+            isListening ? const Color(0xFF4CAF50) : Colors.grey.shade500,
           ),
           textAlign: TextAlign.center,
         ),
@@ -222,9 +299,8 @@ class _VoiceTabState extends State<VoiceTab>
   }
 
   // ── Chat Bubble ────────────────────────────────────────────────────────────
-  // Align handles left/right — this works correctly inside a
-  // full-width SizedBox parent.
-  Widget _buildChatBubble(String text, {required bool isUser}) {
+  Widget _buildChatBubble(String text,
+      {required bool isUser, bool isPartial = false}) {
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -267,6 +343,7 @@ class _VoiceTabState extends State<VoiceTab>
                 text,
                 style: TextStyle(
                   fontSize: 14,
+                  fontStyle: isPartial ? FontStyle.italic : FontStyle.normal,
                   color: isUser
                       ? const Color(0xFF2E7D32)
                       : const Color(0xFF333333),
@@ -285,89 +362,103 @@ class _VoiceTabState extends State<VoiceTab>
   }
 
   // ── Commands Section ───────────────────────────────────────────────────────
-  // crossAxisAlignment.start here is fine because the parent
-  // SizedBox(width: double.infinity) already fills the screen width,
-  // so "start" = left edge of the full screen, not just the content.
   Widget _buildCommandsSection(
       VoiceService voiceService, SensorService sensorService) {
-    final commands = [
-      ('Turn on water pump', Icons.water_rounded),
-      ('Open window', Icons.window_rounded),
-      ('Turn on light', Icons.lightbulb_rounded),
-      ('Check status', Icons.info_outline_rounded),
-    ];
-
+    final isAuto = sensorService.isAutoMode;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Try saying:',
           style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF444444)),
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade600,
+          ),
         ),
         const SizedBox(height: 12),
         Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: commands.map((cmd) {
-            return GestureDetector(
-              onTap: () async {
-                final result = voiceService.processCommand(cmd.$1);
-                if (result['action'] == 'pump') {
-                  await sensorService.togglePump();
-                } else if (result['action'] == 'window') {
-                  await sensorService.toggleWindow();
-                } else if (result['action'] == 'light') {
-                  await sensorService.toggleLight();
-                } else if (result['action'] == 'status') {
-                  final data = sensorService.currentData;
-                  if (data != null) {
-                    final msg =
-                        'Temperature is ${data.temperature.toStringAsFixed(1)}°C. '
-                        'Humidity is ${data.humidity.toStringAsFixed(1)}%. '
-                        'Soil moisture is ${data.soilMoisture.toStringAsFixed(1)}%.';
-                    setState(() => _lastResponse = msg);
-                    await voiceService.speak(msg);
-                    return;
-                  }
-                }
-                setState(() => _lastResponse = result['message']);
-                await voiceService.speak(result['message']);
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                      color: const Color(0xFFA5D6A7), width: 1.2),
-                  boxShadow: [
-                    BoxShadow(
-                        color: Colors.black.withOpacity(0.04),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2)),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(cmd.$2, size: 16, color: const Color(0xFF4CAF50)),
-                    const SizedBox(width: 8),
-                    Text(
-                      cmd.$1,
-                      style: const TextStyle(
-                          fontSize: 13, color: Color(0xFF333333)),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            // Device commands — greyed out in auto mode
+            _buildCommandChip(
+              'Turn on water pump',
+              Icons.water,
+              isDisabled: isAuto,
+            ),
+            _buildCommandChip(
+              'Open window',
+              Icons.window,
+              isDisabled: isAuto,
+            ),
+            _buildCommandChip(
+              'Turn off water pump',
+              Icons.water_drop_outlined,
+              isDisabled: isAuto,
+            ),
+            _buildCommandChip(
+              'Close window',
+              Icons.window_outlined,
+              isDisabled: isAuto,
+            ),
+            // These always work
+            _buildCommandChip('Check status', Icons.info_outline),
+          ],
         ),
+        if (isAuto) ...[
+          const SizedBox(height: 10),
+          Text(
+            '⚠ Device commands are disabled in Auto mode.',
+            style: TextStyle(fontSize: 12, color: Colors.blue.shade600),
+          ),
+        ],
       ],
+    );
+  }
+
+  // ── Command Chip ───────────────────────────────────────────────────────────
+  Widget _buildCommandChip(String label, IconData icon,
+      {bool isDisabled = false}) {
+    return Opacity(
+      opacity: isDisabled ? 0.4 : 1.0,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isDisabled ? Colors.grey.shade100 : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDisabled
+                ? Colors.grey.shade300
+                : const Color(0xFF4CAF50).withOpacity(0.4),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 14,
+              color: isDisabled ? Colors.grey : const Color(0xFF4CAF50),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                color: isDisabled ? Colors.grey : const Color(0xFF333333),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

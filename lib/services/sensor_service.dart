@@ -1,35 +1,9 @@
 // ============================================================
 // FILE: lib/services/sensor_service.dart
-// STATUS: ❌ BUG FIXED
-//
-// PROBLEM WITH SENSOR PAGE / GRAPH:
-//   _loadHistoricalData() reads from 'history/{USER_ID}' in Firebase.
-//   The old send_test_data.py stored history entries as:
-//     { "sensor_data": { ..., "pH": 6.5, ... }, "timestamp": ... }
-//   i.e. the actual readings were NESTED under a "sensor_data" key.
-//
-//   But SensorData.fromMap() expects the readings at the TOP level:
-//     { "temperature": 25, "humidity": 65, ... "timestamp": 1234 }
-//
-//   So when the history had the old format (with sensor_data wrapper),
-//   SensorData.fromMap() received a map that had NO temperature/humidity
-//   keys → all values defaulted to the fallback values → the graph
-//   shows a flat line because every reading is identical.
-//
-// ✅ FIXES APPLIED:
-//   1. _loadHistoricalData() now handles BOTH formats:
-//      - New format (flat, no pH): { "temperature": 25, ... }
-//      - Old format (nested):      { "sensor_data": { "temperature": 25, ... } }
-//   2. Added a 'timestamp' field recovery: if timestamp is missing from the
-//      entry but exists in the Firebase push-key, we estimate it.
-//   3. _generateTestHistory() unchanged — already correct (no pH).
-//
-// WHAT TO DO ABOUT OLD FIREBASE HISTORY DATA:
-//   Option A (recommended): Delete old history in Firebase Console
-//     → Go to: hariyali-10a26-default-rtdb → history → YOUR_USER_ID
-//     → Right-click → Delete
-//     → Run send_test_data.py to generate fresh clean history
-//   Option B: Do nothing — the fix below handles the old format gracefully.
+// UPDATED: Added isAutoMode, toggleMode(), setMode() support.
+//          In auto mode, togglePump() and toggleWindow() are blocked
+//          on the Flutter side. The ESP32 reads the "mode" field from
+//          Firebase and ignores website control commands when in auto.
 // ============================================================
 
 import 'package:flutter/foundation.dart';
@@ -47,16 +21,19 @@ class SensorService extends ChangeNotifier {
   List<SensorData> _historicalData = [];
   List<SensorData> get historicalData => _historicalData;
 
-  bool _isPumpOn    = false;
+  bool _isPumpOn = false;
   bool get isPumpOn => _isPumpOn;
 
-  bool _isWindowOpen    = false;
+  bool _isWindowOpen = false;
   bool get isWindowOpen => _isWindowOpen;
 
-  bool _isLightOn    = false;
-  bool get isLightOn => _isLightOn;
+  // ── NEW: Auto/Manual mode ─────────────────────────────────────────────────
+  // true = auto mode (ESP32 controls devices autonomously)
+  // false = manual mode (website/voice controls devices)
+  bool _isAutoMode = false;
+  bool get isAutoMode => _isAutoMode;
 
-  bool _isLoading    = false;
+  bool _isLoading = false;
   bool get isLoading => _isLoading;
 
   String? _userId;
@@ -66,6 +43,7 @@ class SensorService extends ChangeNotifier {
     _userId = userId;
     _listenToSensorData();
     _listenToControlStates();
+    _listenToMode();           // NEW: listen to mode changes
     _loadHistoricalData();
   }
 
@@ -101,11 +79,41 @@ class SensorService extends ChangeNotifier {
       _isWindowOpen = event.snapshot.value as bool? ?? false;
       notifyListeners();
     });
+  }
 
-    _database.child('controls/$_userId/light').onValue.listen((event) {
-      _isLightOn = event.snapshot.value as bool? ?? false;
+  // ── NEW: Listen to mode field ─────────────────────────────────────────────
+  // Firebase path: controls/<userId>/mode  →  "auto" | "manual"
+  void _listenToMode() {
+    if (_userId == null) return;
+
+    _database.child('controls/$_userId/mode').onValue.listen((event) {
+      final value = event.snapshot.value as String? ?? 'manual';
+      _isAutoMode = (value == 'auto');
       notifyListeners();
     });
+  }
+
+  // ── NEW: Toggle between auto and manual mode ──────────────────────────────
+  Future<void> toggleMode() async {
+    if (_userId == null) return;
+    final newMode = _isAutoMode ? 'manual' : 'auto';
+    try {
+      await _database.child('controls/$_userId/mode').set(newMode);
+    } catch (e) {
+      debugPrint('Error toggling mode: $e');
+    }
+  }
+
+  // ── NEW: Set mode explicitly ──────────────────────────────────────────────
+  Future<void> setMode(bool autoMode) async {
+    if (_userId == null) return;
+    try {
+      await _database
+          .child('controls/$_userId/mode')
+          .set(autoMode ? 'auto' : 'manual');
+    } catch (e) {
+      debugPrint('Error setting mode: $e');
+    }
   }
 
   // ── Load historical data ──────────────────────────────────────────────────
@@ -113,7 +121,7 @@ class SensorService extends ChangeNotifier {
     if (_userId == null) return;
 
     try {
-      final now       = DateTime.now();
+      final now = DateTime.now();
       final yesterday = now.subtract(const Duration(hours: 24));
 
       final snapshot = await _database
@@ -130,23 +138,17 @@ class SensorService extends ChangeNotifier {
           try {
             final map = Map<String, dynamic>.from(entry as Map);
 
-            // ✅ FIX: Handle both old format (has 'sensor_data' wrapper)
-            //         and new format (flat, fields at top level).
             Map<String, dynamic> sensorFields;
             if (map.containsKey('sensor_data') && map['sensor_data'] is Map) {
-              // Old format: { sensor_data: { temperature: ..., pH: ..., ... }, timestamp: ... }
               sensorFields = Map<String, dynamic>.from(map['sensor_data'] as Map);
-              // Promote timestamp to top level if missing
-              if (!sensorFields.containsKey('timestamp') && map.containsKey('timestamp')) {
+              if (!sensorFields.containsKey('timestamp') &&
+                  map.containsKey('timestamp')) {
                 sensorFields['timestamp'] = map['timestamp'];
               }
             } else {
-              // New format (after pH removal): flat map
               sensorFields = map;
             }
 
-            // pH field is simply ignored by SensorData.fromMap() since it
-            // has no pH field — safe to leave it in the map.
             loaded.add(SensorData.fromMap(sensorFields));
           } catch (e) {
             debugPrint('Skipping malformed history entry: $e');
@@ -157,12 +159,10 @@ class SensorService extends ChangeNotifier {
           _historicalData = loaded
             ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
         } else {
-          // No valid entries → use test data so graph shows something
           _historicalData = _generateTestHistory();
         }
         notifyListeners();
       } else {
-        // No history yet — seed with test data so graph shows something
         _historicalData = _generateTestHistory();
         notifyListeners();
       }
@@ -174,18 +174,17 @@ class SensorService extends ChangeNotifier {
   }
 
   // ── Test history (used when Firebase has no history) ──────────────────────
-  // pH removed — no pH field in SensorData constructor
   List<SensorData> _generateTestHistory() {
     final now = DateTime.now();
     return List.generate(20, (i) {
       return SensorData(
-        temperature:  22.0 + (i % 5),
-        humidity:     60.0 + (i % 10),
+        temperature: 22.0 + (i % 5),
+        humidity: 60.0 + (i % 10),
         soilMoisture: 50.0 + (i % 15),
-        nitrogen:     60.0,
-        phosphorus:   40.0,
-        potassium:    50.0,
-        timestamp:    now.subtract(Duration(minutes: (20 - i) * 30)),
+        nitrogen: 60.0,
+        phosphorus: 40.0,
+        potassium: 50.0,
+        timestamp: now.subtract(Duration(minutes: (20 - i) * 30)),
       );
     });
   }
@@ -200,8 +199,16 @@ class SensorService extends ChangeNotifier {
   }
 
   // ── Device controls ───────────────────────────────────────────────────────
+  // UPDATED: All toggle/set methods check mode before writing to Firebase.
+  // In auto mode, the website CANNOT change pump or window state.
+
+  // Toggle pump — blocked in auto mode
   Future<void> togglePump() async {
     if (_userId == null) return;
+    if (_isAutoMode) {
+      debugPrint('Auto mode active: pump control blocked from website.');
+      return;
+    }
     try {
       await _database.child('controls/$_userId/pump').set(!_isPumpOn);
     } catch (e) {
@@ -209,8 +216,27 @@ class SensorService extends ChangeNotifier {
     }
   }
 
+  // Set pump to exact state — blocked in auto mode (used by voice tab)
+  Future<void> setPump(bool state) async {
+    if (_userId == null) return;
+    if (_isAutoMode) {
+      debugPrint('Auto mode active: pump control blocked from website.');
+      return;
+    }
+    try {
+      await _database.child('controls/$_userId/pump').set(state);
+    } catch (e) {
+      debugPrint('Error setting pump: $e');
+    }
+  }
+
+  // Toggle window — blocked in auto mode
   Future<void> toggleWindow() async {
     if (_userId == null) return;
+    if (_isAutoMode) {
+      debugPrint('Auto mode active: window control blocked from website.');
+      return;
+    }
     try {
       await _database.child('controls/$_userId/window').set(!_isWindowOpen);
     } catch (e) {
@@ -218,64 +244,17 @@ class SensorService extends ChangeNotifier {
     }
   }
 
-  Future<void> toggleLight() async {
+  // Set window to exact state — blocked in auto mode (used by voice tab)
+  Future<void> setWindow(bool state) async {
     if (_userId == null) return;
+    if (_isAutoMode) {
+      debugPrint('Auto mode active: window control blocked from website.');
+      return;
+    }
     try {
-      await _database.child('controls/$_userId/light').set(!_isLightOn);
+      await _database.child('controls/$_userId/window').set(state);
     } catch (e) {
-      debugPrint('Error toggling light: $e');
+      debugPrint('Error setting window: $e');
     }
-  }
-
-  // ── Voice command processing ───────────────────────────────────────────────
-  Future<String> processVoiceCommand(String command) async {
-    final lowerCommand = command.toLowerCase();
-
-    if (lowerCommand.contains('water') || lowerCommand.contains('pump')) {
-      if (lowerCommand.contains('on') || lowerCommand.contains('start')) {
-        await _database.child('controls/$_userId/pump').set(true);
-        return 'Water pump turned on';
-      } else if (lowerCommand.contains('off') || lowerCommand.contains('stop')) {
-        await _database.child('controls/$_userId/pump').set(false);
-        return 'Water pump turned off';
-      }
-    }
-
-    if (lowerCommand.contains('window')) {
-      if (lowerCommand.contains('open')) {
-        await _database.child('controls/$_userId/window').set(true);
-        return 'Window opened';
-      } else if (lowerCommand.contains('close')) {
-        await _database.child('controls/$_userId/window').set(false);
-        return 'Window closed';
-      }
-    }
-
-    if (lowerCommand.contains('light') || lowerCommand.contains('bulb')) {
-      if (lowerCommand.contains('on')) {
-        await _database.child('controls/$_userId/light').set(true);
-        return 'Light turned on';
-      } else if (lowerCommand.contains('off')) {
-        await _database.child('controls/$_userId/light').set(false);
-        return 'Light turned off';
-      }
-    }
-
-    // Status — pH removed from status string
-    if (lowerCommand.contains('status') || lowerCommand.contains('how')) {
-      if (_currentData != null) {
-        return 'Temperature: ${_currentData!.temperature.toStringAsFixed(1)}°C, '
-            'Humidity: ${_currentData!.humidity.toStringAsFixed(1)}%, '
-            'Soil Moisture: ${_currentData!.soilMoisture.toStringAsFixed(1)}%';
-      }
-    }
-
-    return 'Sorry, I did not understand that command';
-  }
-
-  // ── Cleanup ───────────────────────────────────────────────────────────────
-  @override
-  void dispose() {
-    super.dispose();
   }
 }

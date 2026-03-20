@@ -1,10 +1,10 @@
 // ============================================================
 // FILE: lib/screens/home/controls_tab.dart
-// ENHANCED: Original manual controls kept exactly the same.
-// "Current Conditions" section expanded with:
-//   - Status badge per reading (Optimal / Low / High / Critical)
-//   - NPK nutrient readings
-//   - A smart "Device Suggestion" tip based on conditions
+// UPDATED: Added Auto / Manual mode toggle at the top.
+//   • In AUTO mode  → pump & window toggles are disabled (greyed out)
+//                    → a banner explains ESP32 is in control
+//   • In MANUAL mode → pump & window toggles work as before
+// All existing UI (Current Conditions, Smart Tip) kept unchanged.
 // ============================================================
 
 import 'package:flutter/material.dart';
@@ -20,21 +20,37 @@ class ControlsTab extends StatelessWidget {
       builder: (context, sensorService, child) {
         return Padding(
           padding: const EdgeInsets.all(16),
-          child: SingleChildScrollView( // ✅ Added scrollable wrapper
+          child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Manual Controls',
-                  style: TextStyle(
+
+                // ── AUTO / MANUAL MODE TOGGLE CARD ─────────────────────────
+                _buildModeToggleCard(sensorService),
+                const SizedBox(height: 20),
+
+                // ── AUTO MODE BANNER (shown only in auto mode) ──────────────
+                if (sensorService.isAutoMode) ...[
+                  _buildAutoModeBanner(),
+                  const SizedBox(height: 16),
+                ],
+
+                // ── Section title changes based on mode ─────────────────────
+                Text(
+                  sensorService.isAutoMode
+                      ? 'Device Status (Auto-Controlled)'
+                      : 'Manual Controls',
+                  style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Control your greenhouse devices manually',
-                  style: TextStyle(
+                Text(
+                  sensorService.isAutoMode
+                      ? 'ESP32 is controlling devices automatically'
+                      : 'Control your greenhouse devices manually',
+                  style: const TextStyle(
                     fontSize: 14,
                     color: Colors.grey,
                   ),
@@ -49,32 +65,25 @@ class ControlsTab extends StatelessWidget {
                   isOn: sensorService.isPumpOn,
                   onToggle: () => sensorService.togglePump(),
                   color: Colors.blue,
+                  isDisabled: sensorService.isAutoMode,
                 ),
                 const SizedBox(height: 16),
 
                 // Window Control
                 _buildControlCard(
                   title: 'Ventilation Window',
-                  subtitle: sensorService.isWindowOpen ? 'Window is OPEN' : 'Window is CLOSED',
+                  subtitle: sensorService.isWindowOpen
+                      ? 'Window is OPEN'
+                      : 'Window is CLOSED',
                   icon: Icons.window,
                   isOn: sensorService.isWindowOpen,
                   onToggle: () => sensorService.toggleWindow(),
                   color: Colors.orange,
-                ),
-                const SizedBox(height: 16),
-
-                // Light Control
-                _buildControlCard(
-                  title: 'Grow Light',
-                  subtitle: sensorService.isLightOn ? 'Light is ON' : 'Light is OFF',
-                  icon: Icons.lightbulb,
-                  isOn: sensorService.isLightOn,
-                  onToggle: () => sensorService.toggleLight(),
-                  color: Colors.amber,
+                  isDisabled: sensorService.isAutoMode,
                 ),
                 const SizedBox(height: 24),
 
-                // ── Current Conditions (ENHANCED) ─────────────────────
+                // ── Current Conditions ─────────────────────────────────────
                 const Text(
                   'Current Conditions',
                   style: TextStyle(
@@ -157,9 +166,8 @@ class ControlsTab extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
 
-                  // ── Smart Device Tip ──────────────────────────────────
+                  // ── Smart Device Tip ──────────────────────────────────────
                   _buildSmartTip(sensorService),
-
                 ] else
                   const Center(
                     child: CircularProgressIndicator(
@@ -174,7 +182,113 @@ class ControlsTab extends StatelessWidget {
     );
   }
 
-  // ── Original _buildControlCard (unchanged) ────────────────────────────────
+  // ── AUTO / MANUAL MODE TOGGLE CARD ────────────────────────────────────────
+  Widget _buildModeToggleCard(SensorService sensorService) {
+    final isAuto = sensorService.isAutoMode;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isAuto
+              ? [const Color(0xFF1565C0), const Color(0xFF1E88E5)] // blue for auto
+              : [const Color(0xFF2E7D32), const Color(0xFF4CAF50)], // green for manual
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: (isAuto ? Colors.blue : Colors.green).withOpacity(0.35),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Icon
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              isAuto ? Icons.smart_toy_rounded : Icons.touch_app_rounded,
+              color: Colors.white,
+              size: 28,
+            ),
+          ),
+          const SizedBox(width: 14),
+          // Labels
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isAuto ? 'Auto Mode' : 'Manual Mode',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isAuto
+                      ? 'ESP32 controls devices automatically'
+                      : 'You control devices from website',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.85),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Toggle switch
+          Switch(
+            value: isAuto,
+            onChanged: (_) => sensorService.toggleMode(),
+            activeColor: Colors.white,
+            activeTrackColor: Colors.white.withOpacity(0.4),
+            inactiveThumbColor: Colors.white,
+            inactiveTrackColor: Colors.white.withOpacity(0.3),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── AUTO MODE BANNER ──────────────────────────────────────────────────────
+  Widget _buildAutoModeBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.shade200, width: 1.5),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Auto mode is ON. The ESP32 is making decisions based on '
+                  'sensor readings. Switch to Manual to control devices yourself.',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.blue.shade800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── CONTROL CARD (updated with isDisabled param) ──────────────────────────
   Widget _buildControlCard({
     required String title,
     required String subtitle,
@@ -182,59 +296,66 @@ class ControlsTab extends StatelessWidget {
     required bool isOn,
     required VoidCallback onToggle,
     required Color color,
+    bool isDisabled = false,
   }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
+    return Opacity(
+      opacity: isDisabled ? 0.55 : 1.0,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
             ),
-            child: Icon(icon, color: color, size: 32),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: isOn ? Colors.green : Colors.grey,
-                  ),
-                ),
-              ],
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 32),
             ),
-          ),
-          Switch(
-            value: isOn,
-            onChanged: (value) => onToggle(),
-            activeColor: const Color(0xFF4CAF50),
-          ),
-        ],
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    isDisabled ? '$subtitle  (Auto)' : subtitle,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDisabled
+                          ? Colors.grey
+                          : (isOn ? Colors.green : Colors.grey),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Switch(
+              value: isOn,
+              // If disabled (auto mode), pass null → switch becomes read-only
+              onChanged: isDisabled ? null : (_) => onToggle(),
+              activeColor: const Color(0xFF4CAF50),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -337,14 +458,18 @@ class ControlsTab extends StatelessWidget {
     );
   }
 
-  // ── Smart Device Tip card ─────────────────────────────────────────────────
+  // ── Smart Device Tip card ──────────────────────────────────────────────────
   Widget _buildSmartTip(SensorService sensorService) {
     final data = sensorService.currentData!;
     String tip = '';
     IconData tipIcon = Icons.tips_and_updates;
     Color tipColor = Colors.teal;
 
-    if (data.soilMoisture < 35 && !sensorService.isPumpOn) {
+    if (sensorService.isAutoMode) {
+      tip = 'Auto mode is active. The ESP32 will handle pump and window automatically.';
+      tipIcon = Icons.smart_toy_rounded;
+      tipColor = Colors.blue;
+    } else if (data.soilMoisture < 35 && !sensorService.isPumpOn) {
       tip = 'Soil moisture is low. Consider turning on the Water Pump.';
       tipIcon = Icons.water;
       tipColor = Colors.blue;
@@ -363,38 +488,24 @@ class ControlsTab extends StatelessWidget {
     } else {
       tip = 'All conditions look good. No device changes needed right now.';
       tipIcon = Icons.check_circle_outline;
-      tipColor = Colors.green;
+      tipColor = Colors.teal;
     }
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: tipColor.withOpacity(0.07),
+        color: tipColor.withOpacity(0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: tipColor.withOpacity(0.25), width: 1),
+        border: Border.all(color: tipColor.withOpacity(0.25)),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(tipIcon, color: tipColor, size: 20),
+          Icon(tipIcon, color: tipColor, size: 22),
           const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Smart Suggestion',
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: tipColor),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  tip,
-                  style: TextStyle(fontSize: 13, color: tipColor.withOpacity(0.85)),
-                ),
-              ],
+            child: Text(
+              tip,
+              style: TextStyle(fontSize: 13, color: tipColor.withOpacity(0.9)),
             ),
           ),
         ],
@@ -402,50 +513,24 @@ class ControlsTab extends StatelessWidget {
     );
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-  String _tempStatus(double t) {
-    if (t < 15) return 'Low';
-    if (t > 30) return 'High';
-    return 'Optimal';
-  }
-  Color _tempStatusColor(double t) {
-    if (t < 15) return Colors.blue;
-    if (t > 30) return Colors.red;
-    return Colors.green;
-  }
+  // ── Status helpers ─────────────────────────────────────────────────────────
+  String _tempStatus(double v) =>
+      v < 15 ? 'Low' : (v <= 30 ? 'Optimal' : (v <= 38 ? 'High' : 'Critical'));
+  Color _tempStatusColor(double v) =>
+      v < 15 ? Colors.blue : (v <= 30 ? Colors.green : (v <= 38 ? Colors.orange : Colors.red));
 
-  String _humidStatus(double h) {
-    if (h < 50) return 'Low';
-    if (h > 80) return 'High';
-    return 'Optimal';
-  }
-  Color _humidStatusColor(double h) {
-    if (h < 50) return Colors.orange;
-    if (h > 80) return Colors.blue;
-    return Colors.green;
-  }
+  String _humidStatus(double v) =>
+      v < 30 ? 'Low' : (v <= 80 ? 'Optimal' : 'High');
+  Color _humidStatusColor(double v) =>
+      v < 30 ? Colors.orange : (v <= 80 ? Colors.green : Colors.red);
 
-  String _moistureStatus(double m) {
-    if (m < 30) return 'Critical';
-    if (m < 40) return 'Low';
-    if (m > 70) return 'High';
-    return 'Optimal';
-  }
-  Color _moistureStatusColor(double m) {
-    if (m < 30) return Colors.red;
-    if (m < 40) return Colors.orange;
-    if (m > 70) return Colors.blue;
-    return Colors.green;
-  }
+  String _moistureStatus(double v) =>
+      v < 30 ? 'Low' : (v <= 70 ? 'Optimal' : 'High');
+  Color _moistureStatusColor(double v) =>
+      v < 30 ? Colors.orange : (v <= 70 ? Colors.green : Colors.red);
 
-  String _npkStatus(double v, double low, double high) {
-    if (v < low) return 'Low';
-    if (v > high) return 'High';
-    return 'Optimal';
-  }
-  Color _npkStatusColor(double v, double low, double high) {
-    if (v < low) return Colors.orange;
-    if (v > high) return Colors.red;
-    return Colors.green;
-  }
+  String _npkStatus(double v, double low, double high) =>
+      v < low ? 'Low' : (v <= high ? 'Optimal' : 'High');
+  Color _npkStatusColor(double v, double low, double high) =>
+      v < low ? Colors.orange : (v <= high ? Colors.green : Colors.red);
 }

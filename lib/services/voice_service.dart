@@ -1,5 +1,10 @@
 // ============================================================================
 // VOICE ASSISTANT SERVICE - Speech recognition and text-to-speech
+// FIX: Removed onPartial callback — user bubble now reads
+//      voiceService.recognizedText directly via Consumer2/notifyListeners,
+//      which is instant with zero delay. The onPartial callback approach
+//      caused extra delay because it went through an async callback chain.
+// NOTE: Light/bulb/lamp command block removed — no physical LED hardware.
 // ============================================================================
 
 import 'package:flutter/foundation.dart';
@@ -12,21 +17,15 @@ class VoiceService extends ChangeNotifier {
   // PROPERTIES
   // ============================================================================
 
-  // Speech recognition instance
   final SpeechToText _speechToText = SpeechToText();
-
-  // Text-to-speech instance
   final FlutterTts _flutterTts = FlutterTts();
 
-  // Is voice assistant listening?
   bool _isListening = false;
   bool get isListening => _isListening;
 
-  // Last recognized text
   String _recognizedText = '';
   String get recognizedText => _recognizedText;
 
-  // Is voice assistant available?
   bool _isAvailable = false;
   bool get isAvailable => _isAvailable;
 
@@ -35,11 +34,9 @@ class VoiceService extends ChangeNotifier {
   // ============================================================================
 
   Future<void> initialize() async {
-    // Request microphone permission
     final status = await Permission.microphone.request();
 
     if (status.isGranted) {
-      // Initialize speech recognition
       _isAvailable = await _speechToText.initialize(
         onStatus: (status) {
           debugPrint('Speech status: $status');
@@ -53,7 +50,6 @@ class VoiceService extends ChangeNotifier {
         },
       );
 
-      // Configure text-to-speech
       await _flutterTts.setLanguage('en-US');
       await _flutterTts.setPitch(1.0);
       await _flutterTts.setSpeechRate(0.5);
@@ -66,6 +62,10 @@ class VoiceService extends ChangeNotifier {
 
   // ============================================================================
   // START LISTENING
+  // FIX: No onPartial callback needed — _recognizedText is updated inside
+  //      the listen() onResult for partial results and notifyListeners() is
+  //      called immediately, so Consumer2 in voice_tab rebuilds instantly
+  //      showing live words with zero callback delay.
   // ============================================================================
 
   Future<void> startListening({
@@ -75,19 +75,24 @@ class VoiceService extends ChangeNotifier {
       await initialize();
     }
 
+    // Clear previous text when starting fresh
+    _recognizedText = '';
+    notifyListeners();
+
     if (_isAvailable && !_isListening) {
       await _speechToText.listen(
         onResult: (result) {
+          // Update recognized text live — Consumer2 rebuilds instantly
           _recognizedText = result.recognizedWords;
           notifyListeners();
 
-          // Call callback with final result
+          // Only fire command when speech is fully finalized
           if (result.finalResult) {
             onResult(_recognizedText);
           }
         },
         listenFor: const Duration(seconds: 10),
-        pauseFor: const Duration(seconds: 3),
+        pauseFor: const Duration(seconds: 2), // reduced from 3 → less delay
         partialResults: true,
         cancelOnError: true,
         listenMode: ListenMode.confirmation,
@@ -108,23 +113,22 @@ class VoiceService extends ChangeNotifier {
   }
 
   // ============================================================================
-  // SPEAK TEXT (Text-to-Speech)
+  // SPEAK TEXT
   // ============================================================================
 
   Future<void> speak(String text) async {
     await _flutterTts.speak(text);
   }
 
-  // ============================================================================
-  // STOP SPEAKING
-  // ============================================================================
-
   Future<void> stopSpeaking() async {
     await _flutterTts.stop();
   }
 
   // ============================================================================
-  // PROCESS COMMAND (Natural Language Understanding)
+  // PROCESS COMMAND
+  // Returns action + state (true/false) + message.
+  // Caller uses state to SET exact value, not toggle.
+  // Light commands removed — no physical LED hardware.
   // ============================================================================
 
   Map<String, dynamic> processCommand(String command) {
@@ -148,34 +152,28 @@ class VoiceService extends ChangeNotifier {
       }
     }
 
-    // Light commands
-    if (_containsAny(lowerCommand, ['light', 'bulb', 'lamp'])) {
-      if (_containsAny(lowerCommand, ['on', 'turn on', 'switch on'])) {
-        return {'action': 'light', 'state': true, 'message': 'Turning on light'};
-      } else if (_containsAny(lowerCommand, ['off', 'turn off', 'switch off'])) {
-        return {'action': 'light', 'state': false, 'message': 'Turning off light'};
-      }
-    }
+    // Light commands REMOVED — no physical LED hardware
 
     // Status check
     if (_containsAny(lowerCommand, ['status', 'how', 'condition', 'report'])) {
-      return {'action': 'status', 'message': 'Checking greenhouse status'};
+      return {'action': 'status', 'state': null, 'message': 'Checking greenhouse status'};
     }
 
     // Crop recommendation
     if (_containsAny(lowerCommand, ['recommend', 'suggest', 'crop', 'plant', 'grow'])) {
-      return {'action': 'recommend', 'message': 'Getting crop recommendations'};
+      return {'action': 'recommend', 'state': null, 'message': 'Getting crop recommendations'};
     }
 
-    // Unknown command
+    // Unknown
     return {
       'action': 'unknown',
-      'message': 'Sorry, I did not understand that command. Try saying "turn on water pump" or "check status"'
+      'state': null,
+      'message': 'Sorry, I did not understand. Try "turn on water pump" or "check status"'
     };
   }
 
   // ============================================================================
-  // HELPER METHOD - Check if text contains any of the keywords
+  // HELPER
   // ============================================================================
 
   bool _containsAny(String text, List<String> keywords) {
@@ -188,9 +186,8 @@ class VoiceService extends ChangeNotifier {
 
   @override
   void dispose() {
-    _speechToText.stop();
+    _speechToText.cancel();
     _flutterTts.stop();
     super.dispose();
   }
 }
-//meow meow meow meow

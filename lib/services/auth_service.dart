@@ -1,5 +1,7 @@
 // ============================================================================
 // AUTH SERVICE - Firebase Authentication
+// NOTE: 'light' removed from default control states on signup —
+//       no physical LED hardware in the system.
 // ============================================================================
 
 import 'package:flutter/foundation.dart';
@@ -66,10 +68,10 @@ class AuthService extends ChangeNotifier {
       });
 
       // Initialize default control states
+      // 'light' removed — no physical LED hardware in the system
       await _database.child('controls/${userCredential.user!.uid}').set({
         'pump': false,
         'window': false,
-        'light': false,
       });
 
       _user = userCredential.user;

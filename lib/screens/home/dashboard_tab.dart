@@ -1,6 +1,7 @@
 // ============================================================
 // FILE: lib/screens/home/dashboard_tab.dart
 // CHANGED: pH stat card removed, _getPhColor() removed
+// CHANGED: Grow Light status removed from System Status (no physical LED)
 // ============================================================
 
 import 'package:flutter/material.dart';
@@ -88,11 +89,11 @@ class DashboardTab extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
 
-                _buildNutrientCard('Nitrogen (N)',   data.nitrogen,   Colors.green),
+                _buildNutrientCard('Nitrogen (N)', data.nitrogen, Colors.green),
                 const SizedBox(height: 8),
                 _buildNutrientCard('Phosphorus (P)', data.phosphorus, Colors.orange),
                 const SizedBox(height: 8),
-                _buildNutrientCard('Potassium (K)',  data.potassium,  Colors.purple),
+                _buildNutrientCard('Potassium (K)', data.potassium, Colors.purple),
                 const SizedBox(height: 16),
 
                 // ── Last updated ─────────────────────────────────────────
@@ -162,7 +163,7 @@ class DashboardTab extends StatelessWidget {
     );
   }
 
-  // ── System status ─────────────────────────────────────────────────────────
+  // ── System status — Light item REMOVED ────────────────────────────────────
   Widget _buildStatusOverview(SensorService service) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -185,12 +186,12 @@ class DashboardTab extends StatelessWidget {
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 12),
+          // Only two items now: Water Pump + Window (Light removed)
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildStatusItem('Water Pump', service.isPumpOn,    Icons.water),
-              _buildStatusItem('Window',     service.isWindowOpen, Icons.window),
-              _buildStatusItem('Light',      service.isLightOn,    Icons.lightbulb),
+              _buildStatusItem('Water Pump', service.isPumpOn, Icons.water),
+              _buildStatusItem('Window', service.isWindowOpen, Icons.window),
             ],
           ),
         ],

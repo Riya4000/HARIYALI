@@ -1,137 +1,238 @@
-# =============================================================================
-# HARIYALI - app.py  (Flask Backend, No pH)
-# STATUS: ✅ CORRECT — only minor CORS improvement added
-# Endpoints: /, /health, /predict, /sensor-data, /train-model
-# =============================================================================
+# ============================================================================
+# HARIYALI BACKEND - Flask API (app.py)
+# Connects Firebase + ML Model for crop recommendations
+# NOTE: Light/LED control removed — no physical LED hardware in the system.
+#       /update-control now only accepts "pump" and "window".
+# ============================================================================
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import crop_predictor as cp
 
+import crop_predictor
+import firebase_config
+
+# Initialize Flask app
 app = Flask(__name__)
 
-# ✅ FIXED: Added '*' to origins so Flutter Web can connect from any localhost port
-CORS(app, resources={r"/*": {
-    "origins": ["http://localhost:*", "http://127.0.0.1:*", "http://localhost:5000"],
-    "methods": ["GET", "POST", "OPTIONS"],
-    "allow_headers": ["Content-Type"],
-    "supports_credentials": False
-}})
+# Enable CORS for Flutter web
+# ✅ FIX: Use "*" to allow ALL origins — Flask-CORS does NOT support
+# wildcard ports like "http://localhost:*". Flutter Web runs on a random
+# port (e.g. localhost:53419) which never matched the old pattern,
+# causing the browser to block every request even though the server runs.
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-predictor = cp.CropPredictor()
+# Initialize Firebase
+firebase_config.initialize_firebase()
+
+# Initialize ML model
+predictor = crop_predictor.CropPredictor()
 predictor.load_model()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HOME
-# ─────────────────────────────────────────────────────────────────────────────
-@app.route("/", methods=["GET"])
+# ============================================================================
+# HOME ROUTE
+# ============================================================================
+
+@app.route('/', methods=['GET'])
 def home():
+    """Home endpoint - Check if API is running"""
     return jsonify({
-        "message": "HARIYALI Backend API (No pH)",
-        "version": "3.0.0",
-        "model_status": "loaded" if predictor.model else "not loaded",
-        "features": ["Temperature", "Humidity", "Soil_Moisture",
-                     "Soil_Type", "Season", "Nitrogen", "Phosphorous", "Potassium"],
-        "endpoints": {
-            "/health":      "GET  - Check server health",
-            "/predict":     "POST - Get crop prediction",
-            "/sensor-data": "POST - Predict from sensor input",
-            "/train-model": "POST - Retrain the model",
+        'status': 'success',
+        'message': 'HARIYALI Backend API is running!',
+        'endpoints': {
+            '/predict':        'POST - Get crop recommendations',
+            '/sensor-data':    'GET  - Get current sensor data from Firebase',
+            '/update-control': 'POST - Update control state (pump/window)',
+            '/train-model':    'POST - Retrain ML model',
         }
     })
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HEALTH
-# ─────────────────────────────────────────────────────────────────────────────
-@app.route("/health", methods=["GET"])
+# ============================================================================
+# HEALTH CHECK — called by Flutter ml_service.dart checkHealth()
+# This route was missing, causing checkHealth() to always return false
+# and the frontend to always show "Backend offline"
+# ============================================================================
+
+@app.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status": "healthy", "model_loaded": predictor.model is not None})
+    """Health check endpoint for Flutter frontend"""
+    return jsonify({
+        'status': 'healthy',
+        'model_loaded': predictor.model is not None
+    })
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PREDICT  (main endpoint called by Flutter recommendation tab)
-# ─────────────────────────────────────────────────────────────────────────────
-@app.route("/predict", methods=["POST", "OPTIONS"])
+# ============================================================================
+# GET SENSOR DATA FROM FIREBASE
+# ============================================================================
+
+@app.route('/sensor-data', methods=['GET'])
+def get_sensor_data():
+    """Fetch current sensor data from Firebase"""
+    try:
+        data = firebase_config.get_sensor_data()
+
+        if data:
+            return jsonify({
+                'status': 'success',
+                'data': data
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'No sensor data available'
+            }), 404
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+# ============================================================================
+# PREDICT CROPS (Main Feature!)
+# ============================================================================
+
+@app.route('/predict', methods=['POST', 'OPTIONS'])
 def predict():
-    if request.method == "OPTIONS":
-        return "", 204
-
-    if predictor.model is None:
-        return jsonify({"error": "Model not loaded. Run train_model.py first.",
-                        "status": "error"}), 500
+    """
+    Get crop recommendations based on sensor data.
+    Accepts either:
+    1. Sensor data in request body
+    2. No data (fetches from Firebase automatically)
+    """
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        return '', 204
 
     try:
-        data = request.json or {}
+        # Get sensor data from request or Firebase
+        sensor_data = request.json if request.json else firebase_config.get_sensor_data()
 
-        required = ["temperature", "humidity", "soilMoisture",
-                    "nitrogen", "phosphorus", "potassium"]
-        missing = [f for f in required if f not in data]
-        if missing:
+        if not sensor_data:
             return jsonify({
-                "error": f"Missing required fields: {missing}",
-                "required_fields": required,
-                "optional_fields": ["soilType", "season"],
-                "status": "error"
+                'status': 'error',
+                'message': 'No sensor data available'
             }), 400
 
-        result = predictor.predict_crops(data)
-        if result is None:
-            return jsonify({"error": "Prediction failed.", "status": "error"}), 500
+        print(f"  Received sensor data: {sensor_data}")
 
-        # ✅ result already contains "recommendations" dict from crop_predictor
-        # No need to call _build_advice separately — crop_predictor handles it
+        # Get predictions from ML model
+        result = predictor.predict_crops(sensor_data)
+
+        if not result:
+            return jsonify({
+                'status': 'error',
+                'message': 'Could not generate recommendations'
+            }), 500
+
+        # Save predictions to Firebase
+        firebase_config.save_prediction_to_firebase(result)
+
+        # Return result directly (already has correct structure from CropPredictor)
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({"error": str(e), "status": "error"}), 500
+        print(f"  Error in /predict: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 
-@app.route("/predict", methods=["GET"])
+@app.route('/predict', methods=['GET'])
 def predict_info():
     return jsonify({
         "message": "Use POST with JSON body to get crop prediction.",
-        "note":    "pH is NOT required (sensor removed).",
+        "note": "pH is NOT required (sensor removed).",
         "example_body": {
             "temperature": 25.5,
-            "humidity":    65.0,
+            "humidity": 65.0,
             "soilMoisture": 50.0,
-            "nitrogen":    80,
-            "phosphorus":  45,
-            "potassium":   50,
-            "soilType":    "Loamy",
-            "season":      "Monsoon"
+            "nitrogen": 80,
+            "phosphorus": 45,
+            "potassium": 50,
+            "soilType": "Loamy",
+            "season": "Monsoon"
         }
     })
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SENSOR DATA
-# ─────────────────────────────────────────────────────────────────────────────
-@app.route("/sensor-data", methods=["POST"])
-def sensor_data():
-    data = request.json or {}
-    result = predictor.predict_crops(data)
-    if result:
-        return jsonify(result)
-    return jsonify({"error": "Sensor prediction failed"}), 500
+# ============================================================================
+# UPDATE CONTROLS (Pump, Window only — Light removed)
+# ============================================================================
 
-# ─────────────────────────────────────────────────────────────────────────────
-# RETRAIN
-# ─────────────────────────────────────────────────────────────────────────────
-@app.route("/train-model", methods=["POST"])
-def retrain():
+@app.route('/update-control', methods=['POST'])
+def update_control():
+    """
+    Update control state in Firebase.
+    Body: {
+        "control": "pump" | "window",
+        "state": true | false
+    }
+    Note: "light" removed — no physical LED hardware.
+    """
     try:
-        import subprocess, sys
-        subprocess.run([sys.executable, "train_model.py"], check=True)
-        predictor.load_model()
-        return jsonify({"status": "success", "message": "Model retrained successfully."})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        data = request.json
+        control_name = data.get('control')
+        state = data.get('state')
 
-# ─────────────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("  HARIYALI Backend Server (No pH)")
-    print("="*60)
+        # "light" removed from valid controls
+        if control_name not in ['pump', 'window']:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid control name. Valid options: pump, window'
+            }), 400
+
+        success = firebase_config.update_control(control_name, state)
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f'{control_name} updated to {state}'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to update control'
+            }), 500
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+# ============================================================================
+# RETRAIN MODEL
+# ============================================================================
+
+@app.route('/train-model', methods=['POST'])
+def train_model():
+    """Retrain the ML model with latest CSV data"""
+    try:
+        print("  Starting model training...")
+        success = predictor.train_model()
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': 'Model trained successfully!'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Model training failed'
+            }), 500
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+# ============================================================================
+if __name__ == '__main__':
+    print("\n" + "=" * 60)
+    print("  HARIYALI Backend Server")
+    print("=" * 60)
     print(f"  Model : {'Loaded ✅' if predictor.model else 'NOT LOADED ❌ — run train_model.py'}")
     print("  http://localhost:5000/")
-    print("="*60 + "\n")
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    print("=" * 60 + "\n")
+    app.run(debug=True, host='0.0.0.0', port=5000)

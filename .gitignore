@@ -78,9 +78,9 @@ ENV/
 .env
 
 # ── ML model file (large binary — regenerate with train_model.py) ──
-*.pkl
-*.pickle
-*.joblib
+# Large model backups only
+backend/crop_model_500trees_backup.pkl
+backend/outputs/*.pkl
 *.h5
 *.hdf5
 
@@ -115,9 +115,9 @@ Thumbs.db
 # NEVER upload these — they contain secret keys
 google-services.json
 GoogleService-Info.plist
-firebase_options.dart
-.firebaserc
-firebase.json
+# Keep firebase_options.dart - Flutter needs it
+# Keep firebase.json - hosting needs it
+# Keep .firebaserc - hosting needs it
 serviceAccountKey.json
 *.env
 .env.*

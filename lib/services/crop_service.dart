@@ -42,7 +42,7 @@ class CropRecommendation {
 
 // ── Crop service ───────────────────────────────────────────────────────────────
 class CropService extends ChangeNotifier {
-  static const String _backendUrl = 'http://localhost:5000'; // Change this!
+  static const String _backendUrl = 'https://hariyali-backend.onrender.com'; // Change this!
 
   List<CropRecommendation> _recommendations = [];
   bool    _isLoading    = false;
