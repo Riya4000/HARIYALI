@@ -14,7 +14,7 @@ class MLService {
   // ── Backend URL ───────────────────────────────────────────────────────────
   // Flutter Web: use the full URL including port 5000
   // Flutter Mobile: change to your computer's local IP e.g. http://192.168.1.5:5000
-  static const String baseUrl = 'http://localhost:5000';
+  static const String baseUrl = 'https://hariyali-backend-vpvl.onrender.com';
 
   // ── Health check ──────────────────────────────────────────────────────────
   // Hits /health endpoint. If that fails, falls back to / (home route).
