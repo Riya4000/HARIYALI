@@ -17,8 +17,6 @@ def initialize_firebase():
     """
     Initialize Firebase Admin SDK.
     Call this ONCE at startup — safe to call multiple times.
-    On Render: reads credentials from FIREBASE_SERVICE_ACCOUNT env variable.
-    Locally: reads from serviceAccountKey.json file.
     """
     try:
         if not firebase_admin._apps:
