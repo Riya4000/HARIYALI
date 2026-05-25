@@ -14,7 +14,9 @@ class MLService {
   // ── Backend URL ───────────────────────────────────────────────────────────
   // Flutter Web: use the full URL including port 5000
   // Flutter Mobile: change to your computer's local IP e.g. http://192.168.1.5:5000
-  static const String baseUrl = 'https://hariyali-backend-vpvl.onrender.com';
+ static const String baseUrl = 'https://hariyali-backend-vpvl.onrender.com';
+  //static const String baseUrl = 'http://192.168.100.12:5000';
+  //static const String baseUrl = 'http://127.0.0.1:5000';
 
   // ── Health check ──────────────────────────────────────────────────────────
   // Hits /health endpoint. If that fails, falls back to / (home route).
@@ -23,7 +25,7 @@ class MLService {
     try {
       final response = await http
           .get(Uri.parse('$baseUrl/health'))
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 90));
       return response.statusCode == 200;
     } catch (e) {
       debugPrint('Backend not reachable: $e');
@@ -31,7 +33,7 @@ class MLService {
       try {
         final fallback = await http
             .get(Uri.parse('$baseUrl/'))
-            .timeout(const Duration(seconds: 5));
+            .timeout(const Duration(seconds: 60));
         return fallback.statusCode == 200;
       } catch (_) {
         return false;
@@ -73,7 +75,7 @@ class MLService {
           'Accept': 'application/json',
         },
         body: jsonEncode(data),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 60));
 
       debugPrint('Backend response: ${response.statusCode}');
 
@@ -127,3 +129,4 @@ class MLService {
     };
   }
 }
+

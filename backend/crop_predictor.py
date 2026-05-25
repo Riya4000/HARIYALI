@@ -1,18 +1,25 @@
 # =============================================================================
-# HARIYALI - crop_predictor.py (Fixed for dict encoders + correct column names)
+# HARIYALI - crop_predictor.py
 #
-# WHAT WAS WRONG:
-#   1. soil_encoder.pkl and season_encoder.pkl are plain dicts  e.g. {"Loamy": 1}
-#      but the old code called .transform([[value]]) on them → AttributeError
+# FIXES APPLIED:
+#   1. soil_encoder.pkl and season_encoder.pkl are plain dicts e.g. {"Loamy": 1}
+#      old code called .transform([[value]]) on them → AttributeError
+#      Fix: use soil_enc[soil_raw] instead of .transform(...)
+#
 #   2. Feature columns saved in feature_columns.pkl are:
 #        ['N', 'P', 'K', 'temperature', 'humidity', 'soil_moisture',
 #         'season_encoded', 'soil_type_encoded']
-#      but the old _encode_input() built keys like:
-#        'Temperature', 'Soil_Moisture', 'Phosphorous', 'Soil_Type_enc'  → KeyError
+#      old _encode_input() built keys like:
+#        'Temperature', 'Soil_Moisture', 'Phosphorous', 'Soil_Type_enc' → KeyError
+#      Fix: column names now exactly match feature_columns.pkl
 #
-# FIXES:
-#   - Dict encoders: use  soil_enc[soil_raw]  instead of  .transform(...)
-#   - Column names now exactly match feature_columns.pkl
+#   3. ✅ "Oil Seeds" → "Oil seeds" to match real dataset label exactly
+#      (data_core.csv has lowercase 's' — without this fix, Oil seeds
+#       predictions return no notes/season/duration from CROP_DATABASE)
+#
+# WHAT STAYS THE SAME:
+#   - All other CROP_DATABASE entries are untouched (unused but harmless)
+#   - All encoder / prediction logic unchanged
 # =============================================================================
 
 import os
@@ -21,38 +28,45 @@ import numpy as np
 import pandas as pd
 
 # ── Crop database (tips shown in frontend) ────────────────────────────────────
+# NOTE: Only these 11 will ever be predicted (your real crops from data_core.csv):
+#   Barley, Cotton, Ground Nuts, Maize, Millets, Oil seeds,
+#   Paddy, Pulses, Sugarcane, Tobacco, Wheat
+#
+# The other entries (Rice, Lentil, Potato, etc.) are kept but will never
+# be returned by the model — they are harmless dead code.
+#
+# ✅ FIX: "Oil Seeds" renamed to "Oil seeds" to match data_core.csv exactly.
 CROP_DATABASE = {
-    "Rice":        {"season": "Monsoon",       "duration": 120, "notes": "Main cereal in Terai; needs flooded fields and high humidity."},
-    "Paddy":       {"season": "Monsoon",       "duration": 120, "notes": "Paddy thrives in warm, flooded Terai conditions."},
-    "Wheat":       {"season": "Winter",        "duration": 110, "notes": "Plant Oct-Nov; harvest Mar-Apr in well-drained soil."},
-    "Maize":       {"season": "Summer/Monsoon","duration": 90,  "notes": "Suitable for hilly regions; plant Feb-Mar or Jun-Jul."},
-    "Barley":      {"season": "Winter",        "duration": 100, "notes": "Hardy crop; tolerates low temperatures and dry conditions."},
-    "Millets":     {"season": "Summer",        "duration": 75,  "notes": "Drought tolerant; grows in sandy soil with low rainfall."},
-    "Sugarcane":   {"season": "Summer",        "duration": 365, "notes": "12-month crop; high water and nutrient demand."},
-    "Lentil":      {"season": "Winter",        "duration": 110, "notes": "After rice harvest; cool weather; nitrogen-fixing legume."},
-    "Chickpea":    {"season": "Winter",        "duration": 100, "notes": "Drought tolerant once established; improves soil fertility."},
-    "Soybean":     {"season": "Monsoon",       "duration": 90,  "notes": "Fixes nitrogen; plant during monsoon in loamy soil."},
-    "Pulses":      {"season": "Winter",        "duration": 110, "notes": "Protein-rich; grows in cool, dry post-monsoon season."},
-    "Potato":      {"season": "Winter",        "duration": 90,  "notes": "High value; plant Sep-Oct or Feb-Mar in hilly areas."},
-    "Tomato":      {"season": "Winter/Summer", "duration": 70,  "notes": "High value vegetable; needs support stakes; ready in 60-80 days."},
-    "Onion":       {"season": "Winter",        "duration": 120, "notes": "Plant Nov-Dec; harvest when tops fall over."},
-    "Garlic":      {"season": "Winter",        "duration": 120, "notes": "Plant Oct-Nov; harvest when leaves turn yellow."},
-    "Ginger":      {"season": "Monsoon",       "duration": 240, "notes": "Plant Mar-Apr; prefers warm humid conditions with shade."},
-    "Turmeric":    {"season": "Monsoon",       "duration": 270, "notes": "Plant Apr-May; ready in 8-9 months; high humidity needed."},
-    "Ground Nuts": {"season": "Summer",        "duration": 120, "notes": "Drought tolerant; sandy loam soil; harvest 120 days after planting."},
-    "Mustard":     {"season": "Winter",        "duration": 90,  "notes": "Plant Oct-Nov; major oil seed crop; harvest Mar."},
-    "Sunflower":   {"season": "Summer",        "duration": 90,  "notes": "Grows fast; faces the sun; oil and seed crop."},
-    "Oil Seeds":   {"season": "Winter",        "duration": 100, "notes": "Post-monsoon oil crop; low water needs."},
-    "Cotton":      {"season": "Summer",        "duration": 150, "notes": "Warm-season fiber crop; long frost-free period needed."},
-    "Tobacco":     {"season": "Summer",        "duration": 120, "notes": "Well-drained sandy soil; moderate water and nutrients."},
-    "Tea":         {"season": "Monsoon",       "duration": 365, "notes": "Hill crop; acidic-friendly soil; high humidity needed."},
-    "Coffee":      {"season": "Monsoon",       "duration": 365, "notes": "Mid-hills; shade-loving; harvest Nov-Feb."},
+    "Rice":        {"season": "Monsoon",        "duration": 120, "notes": "Main cereal in Terai; needs flooded fields and high humidity."},
+    "Paddy":       {"season": "Monsoon",        "duration": 120, "notes": "Paddy thrives in warm, flooded Terai conditions."},
+    "Wheat":       {"season": "Winter",         "duration": 110, "notes": "Plant Oct-Nov; harvest Mar-Apr in well-drained soil."},
+    "Maize":       {"season": "Summer/Monsoon", "duration": 90,  "notes": "Suitable for hilly regions; plant Feb-Mar or Jun-Jul."},
+    "Barley":      {"season": "Winter",         "duration": 100, "notes": "Hardy crop; tolerates low temperatures and dry conditions."},
+    "Millets":     {"season": "Summer",         "duration": 75,  "notes": "Drought tolerant; grows in sandy soil with low rainfall."},
+    "Sugarcane":   {"season": "Summer",         "duration": 365, "notes": "12-month crop; high water and nutrient demand."},
+    "Lentil":      {"season": "Winter",         "duration": 110, "notes": "After rice harvest; cool weather; nitrogen-fixing legume."},
+    "Chickpea":    {"season": "Winter",         "duration": 100, "notes": "Drought tolerant once established; improves soil fertility."},
+    "Soybean":     {"season": "Monsoon",        "duration": 90,  "notes": "Fixes nitrogen; plant during monsoon in loamy soil."},
+    "Pulses":      {"season": "Winter",         "duration": 110, "notes": "Protein-rich; grows in cool, dry post-monsoon season."},
+    "Potato":      {"season": "Winter",         "duration": 90,  "notes": "High value; plant Sep-Oct or Feb-Mar in hilly areas."},
+    "Tomato":      {"season": "Winter/Summer",  "duration": 70,  "notes": "High value vegetable; needs support stakes; ready in 60-80 days."},
+    "Onion":       {"season": "Winter",         "duration": 120, "notes": "Plant Nov-Dec; harvest when tops fall over."},
+    "Garlic":      {"season": "Winter",         "duration": 120, "notes": "Plant Oct-Nov; harvest when leaves turn yellow."},
+    "Ginger":      {"season": "Monsoon",        "duration": 240, "notes": "Plant Mar-Apr; prefers warm humid conditions with shade."},
+    "Turmeric":    {"season": "Monsoon",        "duration": 270, "notes": "Plant Apr-May; ready in 8-9 months; high humidity needed."},
+    "Ground Nuts": {"season": "Summer",         "duration": 120, "notes": "Drought tolerant; sandy loam soil; harvest 120 days after planting."},
+    "Mustard":     {"season": "Winter",         "duration": 90,  "notes": "Plant Oct-Nov; major oil seed crop; harvest Mar."},
+    "Sunflower":   {"season": "Summer",         "duration": 90,  "notes": "Grows fast; faces the sun; oil and seed crop."},
+    "Oil seeds":   {"season": "Winter",         "duration": 100, "notes": "Post-monsoon oil crop; low water needs."},  # ✅ FIX: was "Oil Seeds"
+    "Cotton":      {"season": "Summer",         "duration": 150, "notes": "Warm-season fiber crop; long frost-free period needed."},
+    "Tobacco":     {"season": "Summer",         "duration": 120, "notes": "Well-drained sandy soil; moderate water and nutrients."},
+    "Tea":         {"season": "Monsoon",        "duration": 365, "notes": "Hill crop; acidic-friendly soil; high humidity needed."},
+    "Coffee":      {"season": "Monsoon",        "duration": 365, "notes": "Mid-hills; shade-loving; harvest Nov-Feb."},
 }
 
 # ── Fallback dicts if pkl encoders are plain dicts ────────────────────────────
 DEFAULT_SOIL_MAP   = {"Sandy": 0, "Loamy": 1, "Clayey": 2, "Red": 3, "Black": 4}
 DEFAULT_SEASON_MAP = {"Winter": 0, "Summer": 1, "Monsoon": 2}
-
 
 class CropPredictor:
     """
@@ -68,11 +82,11 @@ class CropPredictor:
     MODEL_DIR = "."
 
     def __init__(self):
-        self.model         = None
-        self.label_encoder = None
-        self.soil_encoder  = None
-        self.season_encoder= None
-        self.feature_cols  = None
+        self.model          = None
+        self.label_encoder  = None
+        self.soil_encoder   = None
+        self.season_encoder = None
+        self.feature_cols   = None
 
     # ── Load model ────────────────────────────────────────────────────────────
     def load_model(self):
@@ -84,20 +98,19 @@ class CropPredictor:
             with open(os.path.join(mp, "season_encoder.pkl"),  "rb") as f: self.season_encoder = pickle.load(f)
             with open(os.path.join(mp, "feature_columns.pkl"), "rb") as f: self.feature_cols   = pickle.load(f)
 
-            # ✅ FIX: label_encoder.pkl classes don't match the model's actual
-            # class indices — causes "unseen labels" error for Turmeric, Sugarcane etc.
-            # Solution: rebuild a correct LabelEncoder directly from model.classes_
-            # which is always in sync with the trained model. The pkl is ignored.
+            # Rebuild LabelEncoder directly from model.classes_ (always in sync)
             from sklearn.preprocessing import LabelEncoder
             self.label_encoder = LabelEncoder()
             self.label_encoder.classes_ = self.model.classes_
+
             print(f"  [CropPredictor] Model loaded  | features: {list(self.feature_cols)}")
             print(f"  [CropPredictor] Label classes | {list(self.label_encoder.classes_)}")
             print(f"  [CropPredictor] Soil encoder  | type: {type(self.soil_encoder).__name__}")
             print(f"  [CropPredictor] Season encoder| type: {type(self.season_encoder).__name__}")
             return True
-        except FileNotFoundError:
-            print("  [CropPredictor] ❌ Model files not found. Run train_model.py first.")
+        except FileNotFoundError as e:
+            print(f"  [CropPredictor] ❌ Model file not found: {e}")
+            print("  Run train_model.py first.")
             return False
         except Exception as e:
             print(f"  [CropPredictor] ❌ Error loading model: {e}")
@@ -112,14 +125,12 @@ class CropPredictor:
         Returns an integer encoding.
         """
         if isinstance(encoder, dict):
-            # Plain dict encoder saved by train_model.py
             result = encoder.get(value)
             if result is None:
                 # Try case-insensitive match
                 for k, v in encoder.items():
                     if k.lower() == value.lower():
                         return v
-                # Not found — use fallback map
                 print(f"  [CropPredictor] ⚠️  '{value}' not in encoder dict {list(encoder.keys())} — using fallback")
                 return fallback_map.get(value, fallback_default)
             return result
@@ -146,23 +157,19 @@ class CropPredictor:
         soil_enc_val   = self._encode_value(self.soil_encoder,   soil_raw,   DEFAULT_SOIL_MAP,   1)
         season_enc_val = self._encode_value(self.season_encoder, season_raw, DEFAULT_SEASON_MAP, 1)
 
-        # ✅ KEY FIX: column names must exactly match feature_columns.pkl
-        # Your pkl has: ['N', 'P', 'K', 'temperature', 'humidity',
-        #                'soil_moisture', 'season_encoded', 'soil_type_encoded']
         row = {
-            "N":                float(sensor_data.get("nitrogen",     60)),
-            "P":                float(sensor_data.get("phosphorus",   40)),
-            "K":                float(sensor_data.get("potassium",    40)),
-            "temperature":      float(sensor_data.get("temperature",  25.0)),
-            "humidity":         float(sensor_data.get("humidity",     60.0)),
-            "soil_moisture":    float(sensor_data.get("soilMoisture", 50.0)),
-            "season_encoded":   float(season_enc_val),
-            "soil_type_encoded":float(soil_enc_val),
+            "N":                 float(sensor_data.get("nitrogen",     60)),
+            "P":                 float(sensor_data.get("phosphorus",   40)),
+            "K":                 float(sensor_data.get("potassium",    40)),
+            "temperature":       float(sensor_data.get("temperature",  25.0)),
+            "humidity":          float(sensor_data.get("humidity",     60.0)),
+            "soil_moisture":     float(sensor_data.get("soilMoisture", 50.0)),
+            "season_encoded":    float(season_enc_val),
+            "soil_type_encoded": float(soil_enc_val),
         }
 
         df = pd.DataFrame([row])
 
-        # Reorder to exactly match training order
         try:
             return df[list(self.feature_cols)]
         except KeyError as e:
@@ -187,9 +194,7 @@ class CropPredictor:
             proba      = self.model.predict_proba(features)[0]
             confidence = float(proba.max())
 
-            # ✅ FIX: model.predict() already returns the crop name as a string
-            # (model was trained with string labels directly).
-            # inverse_transform() is NOT needed and crashes when given a string.
+            # model.predict() returns crop name as string directly
             crop = str(pred_enc)
 
             top3_idx = np.argsort(proba)[-3:][::-1]
@@ -262,9 +267,9 @@ class CropPredictor:
             rec["climate"] = "Climate conditions are favorable."
 
         # Notes from crop database
-        info          = CROP_DATABASE.get(crop, {})
-        rec["notes"]  = info.get("notes",    f"{crop} is suitable for current conditions.")
-        rec["season"] = info.get("season",   "")
+        info            = CROP_DATABASE.get(crop, {})
+        rec["notes"]    = info.get("notes",    f"{crop} is suitable for current conditions.")
+        rec["season"]   = info.get("season",   "")
         rec["duration"] = info.get("duration", "")
 
         return rec

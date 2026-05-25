@@ -9,8 +9,13 @@ Key Improvements:
   4. NEW: Error vs Number of Trees graph
   5. All 4 original charts retained
 
+  ✅ FIX: Now saves all 4 pkl files that crop_predictor.py needs:
+       crop_model.pkl, soil_encoder.pkl, season_encoder.pkl, feature_columns.pkl
+
 HOW TO RUN (in your backend/ folder):
-  python train_model.py
+  Step 1: python prepare_dataset.py   ← convert data_core.csv first
+  Step 2: python train_model.py       ← this file
+  Step 3: python app.py
 
 EXPECTED ACCURACY: ~81-85% test / CV std < 1.5%
 ============================================================================
@@ -40,10 +45,13 @@ FEATURE_COLS = [
 ]
 LABEL_COL = "label"
 
-# ── Style constants (textbook / clean white style) ───────────────────────────
+# ── Encoder dicts (must match prepare_dataset.py exactly) ───────────────────
+SEASON_MAP = {"Winter": 0, "Summer": 1, "Monsoon": 2}
+SOIL_MAP   = {"Sandy": 0, "Loamy": 1, "Clayey": 2, "Red": 3, "Black": 4}
+
+# ── Style constants ──────────────────────────────────────────────────────────
 ORANGE = "#F5A623"
 BLUE   = "#4A90D9"
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 1 — Load Data
@@ -52,17 +60,16 @@ def load_data():
     print("\n[1/6] Loading dataset ...")
     if not os.path.exists(DATASET_PATH):
         print(f"  ERROR: {DATASET_PATH} not found.")
+        print("  Run prepare_dataset.py first to generate it from data_core.csv")
         return None
 
     df = pd.read_csv(DATASET_PATH)
 
-    season_map   = {"Winter": 0, "Summer": 1, "Monsoon": 2}
-    soil_map     = {"Sandy": 0, "Loamy": 1, "Clayey": 2, "Red": 3, "Black": 4}
-
+    # Safety fallbacks — already handled by prepare_dataset.py but kept for robustness
     if "season_encoded" not in df.columns and "season" in df.columns:
-        df["season_encoded"]    = df["season"].map(season_map).fillna(0).astype(int)
+        df["season_encoded"]    = df["season"].map(SEASON_MAP).fillna(0).astype(int)
     if "soil_type_encoded" not in df.columns and "soil_type" in df.columns:
-        df["soil_type_encoded"] = df["soil_type"].map(soil_map).fillna(1).astype(int)
+        df["soil_type_encoded"] = df["soil_type"].map(SOIL_MAP).fillna(1).astype(int)
     if "Crop_Type" in df.columns and "label" not in df.columns:
         df["label"] = df["Crop_Type"]
     if "soil_moisture" not in df.columns and "Soil_Moisture" in df.columns:
@@ -73,26 +80,19 @@ def load_data():
     print(f"  Crops   : {sorted(df[LABEL_COL].unique())}")
     return df
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 2 — K-Fold Cross-Validation
 # ═══════════════════════════════════════════════════════════════════════════
 def kfold_cross_validation(X, y, n_splits=5):
-    """
-    5-fold stratified CV.  This is the main tool for reducing the
-    train/validation gap — it ensures every sample is used for both
-    training and evaluation, giving a much more reliable accuracy estimate
-    and helping tune hyperparameters without over-fitting to a single split.
-    """
     print(f"\n[2/6] Running {n_splits}-Fold Stratified Cross-Validation ...")
 
     cv_model = RandomForestClassifier(
         n_estimators=300,
-        max_depth=25,           # moderate depth — prevents memorising training data
-        min_samples_split=4,    # need at least 4 samples to make a split
-        min_samples_leaf=2,     # each leaf must have ≥2 samples
-        max_features="sqrt",    # standard RF feature sub-sampling
-        class_weight="balanced",# compensate for any slight class imbalance
+        max_depth=25,
+        min_samples_split=4,
+        min_samples_leaf=2,
+        max_features="sqrt",
+        class_weight="balanced",
         random_state=42,
         n_jobs=-1
     )
@@ -104,23 +104,11 @@ def kfold_cross_validation(X, y, n_splits=5):
     print(f"  Mean CV accuracy: {scores.mean()*100:.2f}%  ±  {scores.std()*100:.2f}%")
     return scores
 
-
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 3 — Epoch Accuracy Graph  (styled like figure.png)
+# STEP 3 — Epoch Accuracy Graph
 # ═══════════════════════════════════════════════════════════════════════════
 def plot_epoch_accuracy(X_train, y_train, X_test, y_test, max_trees=200, final_test_acc=None):
-    """
-    Detailed data plot (real tick numbers, real values) on a clean WHITE background:
-      • White background, light grey grid
-      • Y-axis: Accuracy (%) with real numbers
-      • X-axis: Number of Trees (Epochs) with real numbers
-      • Orange  = validation curve
-      • Blue    = training curve
-      • Floating right-side labels (no legend box)
-      • All spines hidden except bottom and left
-      • No top/right border — open, clean feel
-    """
-    print("\n[3/6] Generating epoch-wise learning curve (white detailed style) ...")
+    print("\n[3/6] Generating epoch-wise learning curve ...")
 
     train_accs, test_accs = [], []
     n_range = list(range(5, max_trees + 1, 5))
@@ -142,9 +130,6 @@ def plot_epoch_accuracy(X_train, y_train, X_test, y_test, max_trees=200, final_t
         if n % 50 == 5 or n == max_trees:
             print(f"  Trees={n:>3} | Train={train_accs[-1]*100:.2f}% | Val={test_accs[-1]*100:.2f}%")
 
-    ORANGE = "#F5A623"
-    BLUE   = "#4A90D9"
-
     train_pct = [a * 100 for a in train_accs]
     val_pct   = [a * 100 for a in test_accs]
 
@@ -154,13 +139,11 @@ def plot_epoch_accuracy(X_train, y_train, X_test, y_test, max_trees=200, final_t
     ax.plot(n_range, train_pct, color=BLUE,   linewidth=2.5)
     ax.plot(n_range, val_pct,   color=ORANGE, linewidth=2.5)
 
-    # Floating right-side labels
     ax.text(n_range[-1] + 3, val_pct[-1],   "validation",
             color=ORANGE, fontsize=12, fontweight="bold", va="center")
     ax.text(n_range[-1] + 3, train_pct[-1], "training",
             color=BLUE,   fontsize=12, fontweight="bold", va="center")
 
-    # Final value annotations — use the real final model accuracy if provided
     final_train = train_accs[-1] * 100
     final_val   = (final_test_acc * 100) if final_test_acc is not None else (test_accs[-1] * 100)
     ax.annotate(f"Final Train: {final_train:.2f}%\nFinal Test:  {final_val:.2f}%",
@@ -173,12 +156,10 @@ def plot_epoch_accuracy(X_train, y_train, X_test, y_test, max_trees=200, final_t
     ax.set_title("The Learning Curves",       fontsize=15, fontweight="bold",
                  color="#111111", pad=12)
 
-    # Real tick numbers, clean styling
     ax.tick_params(colors="#555555", labelsize=10)
     ax.set_xlim([n_range[0], n_range[-1] + 28])
     ax.set_ylim([60, 102])
 
-    # Light grey grid, no top/right border
     ax.grid(True, color="#E0E0E0", linewidth=0.8, linestyle="-")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -188,27 +169,17 @@ def plot_epoch_accuracy(X_train, y_train, X_test, y_test, max_trees=200, final_t
     plt.tight_layout()
     plt.savefig("epoch_accuracy.png", dpi=180, bbox_inches="tight", facecolor="white")
     plt.close()
-    print("  ✅ Saved: epoch_accuracy.png  (white detailed style)")
+    print("  ✅ Saved: epoch_accuracy.png")
     return test_accs, train_accs, n_range
 
-
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 4 — Error vs Number of Trees  (NEW)
+# STEP 4 — Error vs Number of Trees
 # ═══════════════════════════════════════════════════════════════════════════
 def plot_error_vs_trees(test_accs, train_accs, n_range):
-    """
-    Same white detailed style as epoch_accuracy.png:
-      • White background, light grey grid, real tick numbers
-      • Orange = validation error, Blue = training error
-      • Floating right-side labels, no top/right border
-    """
-    print("\n[4/6] Generating error vs number-of-trees graph (white detailed style) ...")
+    print("\n[4/6] Generating error vs number-of-trees graph ...")
 
-    train_errors = [( 1 - a) * 100 for a in train_accs]
-    val_errors   = [(1 - a)  * 100 for a in test_accs]
-
-    ORANGE = "#F5A623"
-    BLUE   = "#4A90D9"
+    train_errors = [(1 - a) * 100 for a in train_accs]
+    val_errors   = [(1 - a) * 100 for a in test_accs]
 
     fig, ax = plt.subplots(figsize=(10, 6), facecolor="white")
     ax.set_facecolor("white")
@@ -239,21 +210,12 @@ def plot_error_vs_trees(test_accs, train_accs, n_range):
     plt.tight_layout()
     plt.savefig("epoch_error.png", dpi=180, bbox_inches="tight", facecolor="white")
     plt.close()
-    print("  ✅ Saved: epoch_error.png  (white detailed style)")
-
+    print("  ✅ Saved: epoch_error.png")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 5 — Train Final Model
 # ═══════════════════════════════════════════════════════════════════════════
 def train_final_model(X_train, y_train):
-    """
-    Balanced hyperparameters that reduce the train/test gap:
-      - max_depth=25  (not None) prevents unlimited tree growth that
-        causes 100% training accuracy but poor generalisation
-      - min_samples_split=4 / min_samples_leaf=2 add regularisation
-      - class_weight='balanced' handles any class imbalance
-      - 300 trees — good accuracy without over-fitting
-    """
     print("\n[5/6] Training final model ...")
     model = RandomForestClassifier(
         n_estimators=300,
@@ -268,7 +230,6 @@ def train_final_model(X_train, y_train):
     model.fit(X_train, y_train)
     print("  Training complete!")
     return model
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 6a — Confusion Matrix
@@ -303,7 +264,6 @@ def plot_confusion_matrix(model, X_test, y_test):
     print("  ✅ Saved: confusion_matrix.png")
     return accuracy
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 6b — Decision Tree
 # ═══════════════════════════════════════════════════════════════════════════
@@ -324,7 +284,6 @@ def plot_decision_tree(model):
     plt.savefig("decision_tree_rice.png", dpi=120, bbox_inches="tight")
     plt.close()
     print("  ✅ Saved: decision_tree_rice.png")
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 6c — Feature Importance
@@ -356,7 +315,6 @@ def plot_feature_importance(model):
     plt.close()
     print("  ✅ Saved: feature_importance.png")
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════
@@ -373,7 +331,7 @@ if __name__ == "__main__":
     X = df[FEATURE_COLS]
     y = df[LABEL_COL]
 
-    # 2. K-Fold CV (uses the full dataset — gives reliable accuracy estimate)
+    # 2. K-Fold CV
     cv_scores = kfold_cross_validation(X, y, n_splits=5)
 
     # 3. Single 80/20 split for charts & final model
@@ -383,10 +341,10 @@ if __name__ == "__main__":
     print(f"\n  Train : {len(X_train)} | Test : {len(X_test)}")
 
     # 4. Train final model FIRST so we have the real test accuracy
-    model = train_final_model(X_train, y_train)
+    model    = train_final_model(X_train, y_train)
     accuracy = plot_confusion_matrix(model, X_test, y_test)
 
-    # 5. Epoch accuracy graph — pass real final accuracy so annotation is correct
+    # 5. Epoch accuracy graph
     test_accs, train_accs, n_range = plot_epoch_accuracy(
         X_train, y_train, X_test, y_test, max_trees=200,
         final_test_acc=accuracy
@@ -399,10 +357,27 @@ if __name__ == "__main__":
     plot_decision_tree(model)
     plot_feature_importance(model)
 
-    # 9. Save model
+    # ── 8. Save ALL pkl files that crop_predictor.py needs ──────────────────
+    # ✅ FIX: train_model.py was only saving crop_model.pkl
+    #         crop_predictor.load_model() also loads:
+    #           soil_encoder.pkl, season_encoder.pkl, feature_columns.pkl
+    #         Without these 3, the app crashes at startup with FileNotFoundError.
+
     with open(MODEL_PATH, "wb") as f:
         pickle.dump(model, f)
-    print(f"\n  ✅ Model saved → {MODEL_PATH}")
+    print(f"\n  ✅ Saved → {MODEL_PATH}")
+
+    with open("soil_encoder.pkl", "wb") as f:
+        pickle.dump(SOIL_MAP, f)
+    print("  ✅ Saved → soil_encoder.pkl")
+
+    with open("season_encoder.pkl", "wb") as f:
+        pickle.dump(SEASON_MAP, f)
+    print("  ✅ Saved → season_encoder.pkl")
+
+    with open("feature_columns.pkl", "wb") as f:
+        pickle.dump(FEATURE_COLS, f)
+    print("  ✅ Saved → feature_columns.pkl")
 
     print("\n" + "=" * 60)
     print(f"  TRAINING COMPLETE!")
@@ -411,10 +386,14 @@ if __name__ == "__main__":
     print("=" * 60)
     print("\n  Charts generated:")
     print("   📊 confusion_matrix.png")
-    print("   📈 epoch_accuracy.png      ← dark-styled (matches figure.png)")
-    print("   📉 epoch_error.png         ← NEW: Error vs Trees")
+    print("   📈 epoch_accuracy.png")
+    print("   📉 epoch_error.png")
     print("   🌳 decision_tree_rice.png")
     print("   📉 feature_importance.png")
+    print("\n  Model files saved:")
     print("   💾 crop_model.pkl")
+    print("   💾 soil_encoder.pkl")
+    print("   💾 season_encoder.pkl")
+    print("   💾 feature_columns.pkl")
     print("\n  Next: python app.py")
     print("=" * 60)
